@@ -24,9 +24,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 # Define the directories where the source code can be found and where the
 # compiled libraries/executables should be stored.
-set(LEADD_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/source)
-set(LEADD_LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/lib)
-set(LEADD_BIN_DIR ${CMAKE_CURRENT_SOURCE_DIR}/bin)
+set(LEADD_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR})
+set(LEADD_SOURCE_DIR ${LEADD_ROOT_DIR}/source)
+set(LEADD_LIB_DIR ${LEADD_ROOT_DIR}/lib)
+set(LEADD_BIN_DIR ${LEADD_ROOT_DIR}/bin)
 
 # Include the LEADD library directory in the default RPATH of the targets.
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
@@ -224,8 +225,8 @@ install(
 
 # If requested, build the Python bindings.
 if(BUILD_PYTHON_BINDINGS)
+  add_subdirectory(${LEADD_ROOT_DIR}/pybind11)
   find_package(Python REQUIRED COMPONENTS Interpreter Development)
-  find_package(pybind11 REQUIRED CONFIG)
 
   pybind11_add_module(pyLEADD ${LEADD_SOURCE_DIR}/pyLEADD.cpp)
   target_link_libraries(pyLEADD PUBLIC
