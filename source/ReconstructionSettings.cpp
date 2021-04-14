@@ -117,11 +117,6 @@ ReconstructionSettings::ReconstructionSettings(const std::string& settings_file,
     } else if (key == "PRNG_SEED") {
       prng_seed = std::stoi(value);
       assert(prng_seed >= 0u);
-      if (prng_seed > 0u) {
-        seed_prng = true;
-      } else {
-        seed_prng = false;
-      };
 
     } else if (key == "N_RING_ATOMS_MEAN") {
       n_ring_atoms_mean = std::stod(value);
@@ -400,7 +395,11 @@ unsigned ReconstructionSettings::GetPRNGSeed() const {
 };
 
 bool ReconstructionSettings::SeedPRNG() const {
-  return seed_prng;
+  if (prng_seed == 0) {
+    return false;
+  } else {
+    return true;
+  };
 };
 
 void ReconstructionSettings::SetNRingAtomsMean(float new_n_ring_atoms_mean) {
@@ -662,7 +661,7 @@ void ReconstructionSettings::Print() const {
   std::cout << "TRANSLATION_PROBABILITY: " << probabilities.at("translation") << std::endl;
   std::cout << "STEREO_FLIP_PROBABILITY: " << probabilities.at("stereo_flip") << std::endl;
   std::cout << "PRNG_SEED: " << prng_seed << std::endl;
-  std::cout << "SEED_PRNG: " << seed_prng << std::endl;
+  std::cout << "SEED_PRNG: " << SeedPRNG() << std::endl;
   std::cout << "N_RING_ATOMS_MEAN: " << n_ring_atoms_mean << std::endl;
   std::cout << "N_RING_ATOMS_STDEV: " << n_ring_atoms_stdev << std::endl;
   std::cout << "MAX_N_RING_ATOMS: " << max_n_ring_atoms << std::endl;

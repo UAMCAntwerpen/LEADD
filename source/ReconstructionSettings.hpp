@@ -32,7 +32,6 @@ class ReconstructionSettings {
   };
 
   unsigned prng_seed = 0;
-  bool seed_prng = false;
 
   float n_ring_atoms_mean = 12.0f;
   float n_ring_atoms_stdev = 6.0f;
