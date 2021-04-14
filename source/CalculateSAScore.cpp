@@ -2,6 +2,8 @@
 #include <filesystem>
 #include <boost/progress.hpp>
 #include <boost/program_options.hpp>
+#include <GraphMol/SmilesParse/SmilesParse.h>
+#include <GraphMol/SmilesParse/SmilesWrite.h>
 #include <GraphMol/FileParsers/MolSupplier.h>
 #include "SAScore.hpp"
 
@@ -65,6 +67,7 @@ int main(int argc, const char* argv[]) {
       if (mol) {
         // Calculate its SAScore and write it to the output file.
         double sascore = SAScore(*mol, feature_library);
+        output_stream << RDKit::MolToSmiles(*mol) << " " << sascore << "\n";
       } else {
         std::cout << "WARNING: Molecule couldn't be read." << std::endl;
       };
@@ -88,6 +91,7 @@ int main(int argc, const char* argv[]) {
       if (mol) {
         // Calculate its SAScore and write it to the output file.
         double sascore = SAScore(*mol, feature_library);
+        output_stream << RDKit::MolToSmiles(*mol) << " " << sascore << "\n";
       } else {
         std::cout << "WARNING: Molecule couldn't be read." << std::endl;
       };

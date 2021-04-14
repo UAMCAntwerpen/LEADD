@@ -173,6 +173,7 @@ target_link_libraries(MakeFeatureLibrary
 add_executable(CalculateSAScore ${LEADD_SOURCE_DIR}/CalculateSAScore.cpp)
 target_link_libraries(CalculateSAScore
   SAScore
+  RDKitSmilesParse
   RDKitFileParsers
   boost_program_options
 )
