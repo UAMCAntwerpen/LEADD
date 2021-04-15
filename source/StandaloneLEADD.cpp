@@ -81,7 +81,7 @@ int main(int argc, const char* argv[]) {
 
   // If requested, draw the best molecule and write out its ConnectionPoint weights.
   if (settings.WriteReport()) {
-    leadd.GetReport().WriteOperationFrequencies();
+    leadd.WriteOperationFrequenciesToReport();
     if (settings.MonitorBestMolecule()) {
       leadd.ReportOnBestMolecule();
     };

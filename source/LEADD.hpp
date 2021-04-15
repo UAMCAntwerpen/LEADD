@@ -59,6 +59,7 @@ public:
   bool TerminationCriteriaMet();
 
   void UpdateReport();
+  void WriteOperationFrequenciesToReport();
   void ReportOnBestMolecule();
 
   void Cleanup();

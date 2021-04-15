@@ -519,6 +519,10 @@ void LEADD::UpdateReport() {
   report.WriteNRings(generation_n, population);
 };
 
+void LEADD::WriteOperationFrequenciesToReport() {
+  report.WriteOperationFrequencies();
+};
+
 void LEADD::ReportOnBestMolecule() {
   ReconstructedMol& rank1 = population.front();
   std::string score_text = std::to_string(rank1.GetScore());

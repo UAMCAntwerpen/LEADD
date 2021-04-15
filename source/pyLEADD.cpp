@@ -50,6 +50,7 @@ PYBIND11_MODULE(pyLEADD, module) {
     .def("GenerateChildren", &LEADD::GenerateChildren)
     .def("SelectivePressure", &LEADD::SelectivePressure)
     .def("UpdateReport", &LEADD::UpdateReport)
+    .def("WriteOperationFrequenciesToReport", &LEADD::WriteOperationFrequenciesToReport)
     .def("SetPopulation", &LEADD::SetPopulation,
          pybind11::arg("population"), pybind11::arg("reset_weights") = true)
     .def("GetPopulation", &LEADD::GetPopulation,
