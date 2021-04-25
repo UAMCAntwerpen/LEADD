@@ -113,6 +113,7 @@ public:
   CONNECTIONS_SET& operator[](const Connection& connection);
   const CONNECTIONS_SET& at(const Connection& connection) const;
 
+  unsigned GetStringency() const;
   bool HasConnection(const Connection& connection) const;
   const COMPATIBILITY_TABLE& GetCompatibilityTable() const;
   void Print() const;

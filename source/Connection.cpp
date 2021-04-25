@@ -182,6 +182,10 @@ const CONNECTIONS_SET& ConnectionCompatibilities::at(const Connection & connecti
   return compatibility_table.at(connection);
 };
 
+unsigned ConnectionCompatibilities::GetStringency() const {
+  return stringency;
+};
+
 bool ConnectionCompatibilities::HasConnection(const Connection& connection) const {
   if (compatibility_table.find(connection) == compatibility_table.end()) {
     return false;

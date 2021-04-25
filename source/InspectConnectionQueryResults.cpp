@@ -7,14 +7,15 @@
 int main(int argc, const char* argv[]) {
   // Set up a command line argument parser.
   std::string input;
-
+  bool verbose = false;
   boost::program_options::options_description description("Options");
   description.add_options()
     ("help,h",
       "Display this help message.")
     ("input,i", boost::program_options::value<std::string>(&input)->required(),
-      "Path to a serialized ConnectionQueryResults object (.cqr file).");
-
+      "Path to a serialized ConnectionQueryResults object (.cqr file).")
+    ("verbose,v", boost::program_options::bool_switch(&verbose)->default_value(false),
+      "Flag to print the ConnectionCompatibilities to standard output.");
   boost::program_options::positional_options_description positionals_description;
   positionals_description.add("input", 1);
   boost::program_options::variables_map vm;
@@ -42,10 +43,16 @@ int main(int argc, const char* argv[]) {
   binar >> query_results;
 
   // Print the parameters to the standard output.
+  std::cout << "Stringency: " << query_results.GetConnectionCompatibilities().GetStringency() << std::endl;
   std::cout << "Acyclic fragment frequency gamma: " << query_results.GetAcyclicFrequencyGamma() << std::endl;
   std::cout << "Acyclic fragment level gamma: " << query_results.GetAcyclicLevelGamma() << std::endl;
   std::cout << "Ring fragment frequency gamma: " << query_results.GetRingFrequencyGamma() << std::endl;
   std::cout << "Ring fragment level gamma: " << query_results.GetRingLevelGamma() << std::endl;
+
+  // If requested, print the ConnectionCompatibilities to the standard output.
+  if (verbose) {
+    query_results.GetConnectionCompatibilities().Print();
+  };
 
   // Signal success.
   return 0;

@@ -157,8 +157,8 @@ target_link_libraries(PrecalculateConnectionQueryResults
   boost_program_options
 )
 
-add_executable(CheckConnectionQueryResultsGammas ${LEADD_SOURCE_DIR}/CheckConnectionQueryResultsGammas.cpp)
-target_link_libraries(CheckConnectionQueryResultsGammas
+add_executable(InspectConnectionQueryResults ${LEADD_SOURCE_DIR}/InspectConnectionQueryResults.cpp)
+target_link_libraries(InspectConnectionQueryResults
   ConnectionQueryResults
   boost_program_options
 )
@@ -215,7 +215,7 @@ install(
     Fragment
     MakeFragmentSimilarityMatrix
     PrecalculateConnectionQueryResults
-    CheckConnectionQueryResultsGammas
+    InspectConnectionQueryResults
     MakeFeatureLibrary
     CalculateSAScore
     ConvertToReconstruction
