@@ -1,9 +1,9 @@
-### Input ###
+### Input file settings ###
 FRAGMENT_DATABASE_FILE /home/alan/LEADD/example/fragments.db
 CONNECTION_QUERY_RESULTS_FILE /home/alan/LEADD/example/fragments.cqr
 
 
-### Gamma exponents ###
+### Fragment sampling settings ###
 ACYCLIC_FREQUENCY_GAMMA 1.0
 ACYCLIC_LEVEL_GAMMA 0.0
 RING_FREQUENCY_GAMMA 1.0
@@ -11,7 +11,7 @@ RING_LEVEL_GAMMA 0.0
 SCORE_GAMMA 2.5
 
 
-### Operation probabilities ###
+### Genetic operation probabilities ###
 PERIPHERAL_EXPANSION_PROBABILITY 4
 PERIPHERAL_DELETION_PROBABILITY 4
 PERIPHERAL_SUBSTITUTION_PROBABILITY 28
@@ -24,7 +24,7 @@ TRANSLATION_PROBABILITY 4
 STEREO_FLIP_PROBABILITY 0
 
 
-### Reconstruction parameters ###
+### Designed molecule settings ###
 N_RING_ATOMS_MEAN 22
 N_RING_ATOMS_STDEV 11
 MAX_N_RING_ATOMS 44
@@ -49,7 +49,7 @@ MAX_GENERATIONS_STUCK 1000
 MAX_ATTEMPTS_PER_GENERATION 10
 
 
-### Synthetic accessibility ###
+### Synthetic accessibility settings ###
 FEATURE_LIBRARY_FILE /home/alan/VirtualLibraries/FeatureLibraries/CHEMBL28_small_molecules_20210406_filtered.fl
 MAX_SASCORE 10.0
 SASCORE_HEURISTIC_MU 2.230044
@@ -57,7 +57,7 @@ SASCORE_HEURISTIC_SIGMA 0.6526308
 USE_SASCORE_HEURISTIC 0
 
 
-### Guided evolution ###
+### Guided evolution settings ###
 SIMILARITY_MATRIX_FILE /home/alan/LEADD/example/fragments.h5
 ACYCLIC_LEARNING_SIMILARITY_THRESHOLD 0.0
 RING_LEARNING_SIMILARITY_THRESHOLD 0.0
@@ -67,14 +67,14 @@ RING_POSITIVE_REINFORCEMENT 0.0
 RING_NEGATIVE_REINFORCEMENT 0.0
 
 
-### Restart ###
+### Restart settings ###
 RESTART_INPUT_FILE
 RESET_WEIGHTS_ON_RESTART 0
 RESTART_OUTPUT_FILE
 N_GENERATIONS_PER_SAVE 2000
 
 
-### Scoring function ###
+### Scoring settings ###
 SCORING_FUNCTION_INPUT_FILE
 SCORING_FUNCTION_CALL
 SCORES_OUTPUT_FILE
@@ -82,6 +82,6 @@ TEMPLATE_MOL_SMILES CN1CCN(CCNc2nc3cc(Cl)c(cc3nc2NCCN2CCN(C)CC2)C#CCCO)CC1
 SCORE_FIRST_POPULATION 1
 
 
-### Reporting ###
-WRITE_REPORT 1
+### Reporting settings ###
+WRITE_REPORT 0
 MONITOR_BEST_MOLECULE 0
