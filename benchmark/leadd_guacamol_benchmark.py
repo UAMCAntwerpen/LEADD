@@ -85,12 +85,14 @@ class LEADD(GoalDirectedGenerator):
         return scores
 
     def score_population(self, scoring_function):
-        smiles = [individual.GetSanitizedSMILES() for individual in self.leadd.GetPopulation()]
+        smiles = [individual.GetSanitizedSMILES() for individual in self.leadd.GetPopulation() if individual.IsChild()]
         scores = self.pool(joblib.delayed(scoring_function.score)(s) for s in smiles)
         individual_idx = 0
         for individual in self.leadd.GetPopulation():
-            individual.SetScore(scores[individual_idx])
-            individual_idx += 1
+            if individual.IsChild():
+                individual.SetScore(scores[individual_idx])
+                individual_idx += 1
+        assert(len(scores) == individual_idx)
         return len(scores)
 
     def generate_optimized_molecules(self, scoring_function: ScoringFunction, number_molecules: int, starting_population: Optional[List[str]] = None) -> List[str]:
@@ -118,6 +120,7 @@ class LEADD(GoalDirectedGenerator):
             # Score the children.
             start = time.time()
             n = self.score_population(scoring_function)
+            leadd.IncreaseNScoringCalls(n)
             self.n_scored_molecules += n
             self.time_spend_scoring += time.time() - start
             # Keep the best individuals and wrap up the generation.
