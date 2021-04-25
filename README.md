@@ -1,6 +1,6 @@
 # LEADD
 ## About
-LEADD (Lamarckian Evolutionary Algorithm for *de novo* Drug Design) is a tool for molecular design and optimization. 
+LEADD (Lamarckian Evolutionary Algorithm for *de novo* Drug Design) is a tool for molecular design and optimization.
 
 Molecules are represented as meta-graphs of molecular fragments. Fragments are extracted by fragmenting an input virtual library, and broken bonds are converted to labelled attachment points (a.k.a. connectors). Molecules are reassembled by genetic operators that combine fragments through said connectors. Knowledge-based connectivity rules, extracted from the same input library, are enforced throughout the process. A population of molecules is evolved stochastically through use of genetic operators, with the goal of optimizing a user-provided scoring function. A Lamarckian evolutionary mechanism adjusts the reproductive behaviour of the molecules based on the outcome of the previous generation.
 
@@ -61,7 +61,7 @@ Thereafter, we precompute which fragments are compatible with each connector. He
 ${LEADD}/bin/PrecalculateConnectionQueryResults -i fragments.db -o fragments.cqr -t settings.txt -s 1
 ```
 
-If you want to enable guided evolution you will need to generate a fragments similarity matrix. You can set `OMP_NUM_THREADS` to adjust the parallelism of the process. If your fragments database is very large, think twice before creating this matrix as it [can be very expensive!](#What-should-I-consider-when-selecting-input-molecules-to-create-the-fragments-database?).
+If you want to enable guided evolution you will need to generate a fragments similarity matrix. You can set `OMP_NUM_THREADS` to adjust the parallelism of the process. If your fragments database is very large, think twice before creating this matrix as it [can be very expensive!](#What-should-I-consider-when-selecting-input-molecules-to-create-the-fragments-database\?).
 
 ```bash
 ${LEADD}/bin/MakeFragmentSimilarityMatrix -i fragments.db -o fragments.h5
@@ -73,7 +73,7 @@ If you would like to use the [SAScore](https://www.ncbi.nlm.nih.gov/pmc/articles
 ${LEADD}/bin/MakeFeatureLibrary -i CHEMBL.smi -o CHEMBL.fl
 ```
 
-Now you are ready to run LEADD itself. Make sure the absolute paths to the files we just created are within your `settings.txt` file. You'll have to [adapt](#Settings) the [provided settings file](example/settings.txt) a bit. 
+Now you are ready to run LEADD itself. Make sure the absolute paths to the files we just created are within your `settings.txt` file. You'll have to [adapt](#Settings) the [provided settings file](example/settings.txt) a bit.
 
 If you are using LEADD programatically with the Python bindings, you should place your Python script in the same directory as the `pyLEADD` library (`${LEADD}/lib`). The [provided example script](example/leadd_example.py) will attempt to rediscover [one of the ligands we just fragmented](example/CHEMBL3732863.smi):
 
@@ -176,10 +176,10 @@ Guided evolution will be enabled when `SIMILARITY_MATRIX_FILE` is specified and 
 
 ### Restart settings
 By default LEADD generates a random starting population. Alternatively, users may specify their own starting populations. This can be done in two ways:
-* Programatically with the `LEADD::SetPopulation` function. This can be done with both the [C++](LEADD.hpp) and [Python](source/pyLEADD.cpp) APIs.
+* Programatically with the `LEADD::SetPopulation` function. This can be done with both the [C++](source/LEADD.hpp) and [Python](source/pyLEADD.cpp) APIs.
 * By specifying a `.rst` `RESTART_INPUT_FILE`.
 
-Restart `.rst` files can be generated either by LEADD itself (if `RESTART_OUTPUT_FILE` is specified), by the `ConvertToReconstruction` executable or programatically with the `MakePopulationFromSMILES` function. 
+Restart `.rst` files can be generated either by LEADD itself (if `RESTART_OUTPUT_FILE` is specified), by the `ConvertToReconstruction` executable or programatically with the `MakePopulationFromSMILES` function.
 
 However, the user should be aware of the limitations of the latter two approaches. Since LEADD operates with meta-graphs, which are more information rich than regular molecular graphs, some compromises had to be made:
 * Acylic regions will always be transformed into atomic fragments
