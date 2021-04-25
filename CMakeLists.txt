@@ -1,13 +1,11 @@
 cmake_minimum_required(VERSION 3.15)
 
-# IMPROVE: Specify specific versions of Boost, RDKit, and OpenMP (and others)
-
 # Define the project.
 project(LEADD
   LANGUAGES CXX
-  VERSION 0.0.0
+  VERSION 1.0.0
   DESCRIPTION "Lamarckian Evolutionary Algorithm for de novo Drug Design"
-  HOMEPAGE_URL "placeholder.com"
+  HOMEPAGE_URL "https://github.com/AlanKerstjens/LEADD"
 )
 
 # Create an option to allow the user to specify whether they want to build
@@ -17,10 +15,6 @@ option(BUILD_PYTHON_BINDINGS "Build LEADD Python bindings using pybind11" ON)
 # Specify the C++ standard.
 set(CMAKE_CXX_STANDARD 17) # We need C++17 to have access to std::filesystem
 set(CMAKE_CXX_STANDARD_REQUIRED True)
-
-# set(CMAKE_CXX_FLAGS_RELEASE "-O3")
-# set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fno-omit-frame-pointer -fsanitize=undefined")
-# set(CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_LINKER_FLAGS_DEBUG} -fno-omit-frame-pointer -fsanitize=undefined")
 
 # Define the directories where the source code can be found and where the
 # compiled libraries/executables should be stored.
