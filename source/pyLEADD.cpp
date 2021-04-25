@@ -49,6 +49,7 @@ PYBIND11_MODULE(pyLEADD, module) {
     .def("TerminationCriteriaMet", &LEADD::TerminationCriteriaMet)
     .def("GenerateChildren", &LEADD::GenerateChildren)
     .def("SelectivePressure", &LEADD::SelectivePressure)
+    .def("IncreaseNScoringCalls", &LEADD::IncreaseNScoringCalls)
     .def("UpdateReport", &LEADD::UpdateReport)
     .def("WriteOperationFrequenciesToReport", &LEADD::WriteOperationFrequenciesToReport)
     .def("SetPopulation", &LEADD::SetPopulation,

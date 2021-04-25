@@ -24,6 +24,7 @@ private:
   std::mt19937 prng;
 
   unsigned generation_n = 0;
+  unsigned n_scoring_calls = 0;
   float best_score = 0;
   unsigned n_generations_stuck = 0;
   unsigned max_individual_id = 0;
@@ -37,7 +38,7 @@ private:
   void MakePopulationTakeBrickOwnership();
   void AssignConnectorWeightsToPopulation();
   void SampleParents();
-  void ScoreChildrenBySimilarity();
+  unsigned ScoreChildrenBySimilarity();
   unsigned ScoreChildrenExternally();
   void FinishGeneration();
 
@@ -54,10 +55,11 @@ public:
   void WritePopulationSMILES(const std::string& file_path);
 
   unsigned GenerateChildren();
-  void ScoreChildren();
+  unsigned ScoreChildren();
   unsigned SelectivePressure();
   bool TerminationCriteriaMet();
 
+  void IncreaseNScoringCalls(unsigned n);
   void UpdateReport();
   void WriteOperationFrequenciesToReport();
   void ReportOnBestMolecule();

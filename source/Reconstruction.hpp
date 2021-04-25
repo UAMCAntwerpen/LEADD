@@ -102,7 +102,7 @@ class EvolutionReport {
     EvolutionReport();
     EvolutionReport(const std::string& output_directory_path);
 
-    void WriteScores(unsigned generation, const std::list<ReconstructedMol>& reconstructions);
+    void WriteScores(unsigned generation, unsigned n_scoring_calls, const std::list<ReconstructedMol>& reconstructions);
     void WriteNRings(unsigned generation, const std::list<ReconstructedMol>& reconstructions);
     void WriteOperationFrequencies();
     void WriteWeights(const ReconstructedMol& reconstruction, const std::string& file_name);

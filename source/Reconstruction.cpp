@@ -125,14 +125,14 @@ EvolutionReport::EvolutionReport(const std::string& output_directory_path) {
   n_ring_atoms_csv.open(n_ring_atoms_csv_path);
   operation_frequencies_csv.open(operation_frequencies_csv_path);
   // Write the headers of the CSV files.
-  scores_csv << "Generation,Scores\n";
+  scores_csv << "Generation,NScoringCalls,Scores\n";
   n_ring_atoms_csv << "Generation, NRings\n";
   operation_frequencies_csv << ",PeripheralExpansion,InternalExpansion,PeripheralDeletion,InternalDeletion,";
   operation_frequencies_csv << "PeripheralSubstitution,InternalSubstitution,PeripheralCrossover,InternalCrossover,Translation,StereoFlip\n";
 };
 
-void EvolutionReport::WriteScores(unsigned generation, const std::list<ReconstructedMol>& reconstructions) {
-  scores_csv << generation;
+void EvolutionReport::WriteScores(unsigned generation, unsigned n_scoring_calls, const std::list<ReconstructedMol>& reconstructions) {
+  scores_csv << generation << "," << n_scoring_calls;
   for (const ReconstructedMol& reconstruction : reconstructions) {
     scores_csv << "," << reconstruction.GetScore();
   };

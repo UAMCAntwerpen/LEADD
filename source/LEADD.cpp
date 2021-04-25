@@ -445,13 +445,16 @@ bool LEADD::TerminationCriteriaMet() {
   return false;
 };
 
-void LEADD::ScoreChildrenBySimilarity() {
+unsigned LEADD::ScoreChildrenBySimilarity() {
   assert(reference != nullptr);
+  unsigned n_scored_molecules = 0;
   for (ReconstructedMol& individual : population) {
     if (individual.IsChild()) {
       individual.Score(reference);
+      ++n_scored_molecules;
     };
   };
+  return n_scored_molecules;
 };
 
 unsigned LEADD::ScoreChildrenExternally() {
@@ -504,18 +507,26 @@ unsigned LEADD::ScoreChildrenExternally() {
   return n_scored_molecules;
 };
 
-void LEADD::ScoreChildren() {
+unsigned LEADD::ScoreChildren() {
+  unsigned n_scored_molecules = 0;
   // If an external scoring function was specified call it.
   if (settings.UsingExternalScoringFunction()) {
-    ScoreChildrenExternally();
+    n_scored_molecules = ScoreChildrenExternally();
   // Otherwise use the similarity to the template molecule as a score.
   } else {
-    ScoreChildrenBySimilarity();
+    n_scored_molecules = ScoreChildrenBySimilarity();
   };
+  // Update the amount of scored molecules.
+  n_scoring_calls += n_scored_molecules;
+  return n_scored_molecules;
+};
+
+void LEADD::IncreaseNScoringCalls(unsigned n) {
+  n_scoring_calls += n;
 };
 
 void LEADD::UpdateReport() {
-  report.WriteScores(generation_n, population);
+  report.WriteScores(generation_n, n_scoring_calls, population);
   report.WriteNRings(generation_n, population);
 };
 
