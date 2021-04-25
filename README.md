@@ -61,7 +61,7 @@ Thereafter, we precompute which fragments are compatible with each connector. He
 ${LEADD}/bin/PrecalculateConnectionQueryResults -i fragments.db -o fragments.cqr -t settings.txt -s 1
 ```
 
-If you want to enable guided evolution you will need to generate a fragments similarity matrix. You can set `OMP_NUM_THREADS` to adjust the parallelism of the process. If your fragments database is very large, think twice before creating this matrix as it [can be very expensive!](#What-should-I-consider-when-selecting-input-molecules-to-create-the-fragments-database\?).
+If you want to enable guided evolution you will need to generate a fragments similarity matrix. You can set `OMP_NUM_THREADS` to adjust the parallelism of the process. If your fragments database is very large, think twice before creating this matrix as it [can be very expensive!](#What-should-I-consider-when-selecting-input-molecules-to-create-the-fragments-database).
 
 ```bash
 ${LEADD}/bin/MakeFragmentSimilarityMatrix -i fragments.db -o fragments.h5
