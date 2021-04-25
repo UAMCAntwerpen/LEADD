@@ -120,7 +120,7 @@ class LEADD(GoalDirectedGenerator):
             # Score the children.
             start = time.time()
             n = self.score_population(scoring_function)
-            leadd.IncreaseNScoringCalls(n)
+            self.leadd.IncreaseNScoringCalls(n)
             self.n_scored_molecules += n
             self.time_spend_scoring += time.time() - start
             # Keep the best individuals and wrap up the generation.
