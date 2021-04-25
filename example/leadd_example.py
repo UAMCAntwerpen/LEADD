@@ -81,7 +81,7 @@ def Main():
     output_molecules_path = os.path.join(args.output, "designed_molecules.smi")
     with open(output_molecules_path, "w") as file:
         for molecule in leadd.GetPopulation():
-            file.write(molecule.GetSanitizedSMILES(), molecule.GetScore())
+            file.write(f"{molecule.GetSanitizedSMILES()} {molecule.GetScore()}\n")
 
     # Release LEADD's resources.
     leadd.Cleanup()
