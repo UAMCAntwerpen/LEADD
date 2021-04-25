@@ -25,7 +25,7 @@ class ReconstructionSettings {
     {"peripheral_substitution", 28u}, {"peripheral_crossover", 10u},
     {"internal_expansion", 4u},       {"internal_deletion", 4u},
     {"internal_substitution", 28u},   {"internal_crossover", 10u},
-    {"translation", 4u},              {"stereo_flip", 4u},
+    {"translation", 4u},              {"stereo_flip", 0u},
     {"cyclization", 0u},              {"ring_expansion", 0u},
     {"ring_deletion", 0u},            {"ring_substitution", 0u},
     {"ring_crossover", 0u},           {"ring_translation", 0u}
@@ -51,7 +51,7 @@ class ReconstructionSettings {
   unsigned n_generations = 10000u;
   unsigned n_children_per_generation = n_seeds;
   unsigned n_survivors_per_generation = n_seeds;
-  float max_child_similarity = 0.95f;
+  float max_child_similarity = 0.90f;
   bool similarity_filter = true;
 
   float termination_score = 1.0f;
@@ -62,7 +62,7 @@ class ReconstructionSettings {
   unsigned max_maximum_bipartite_matchings = 100u;
 
   std::string feature_library_file;
-  double max_sascore = 6.5;
+  double max_sascore = 10.0;
   double sascore_heuristic_mu = 2.230044;
   double sascore_heuristic_sigma = 0.6526308;
   bool sascore_filter = false;
