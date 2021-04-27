@@ -264,7 +264,7 @@ void LEADD::SampleParents() {
   // Sample some individuals to be parents for the next generation.
   // If all individuals have a weight of 0 the choice is purely random.
   if (cumulative_score == 0.0f) {
-    std::uniform_int_distribution<unsigned> distribution (0, settings.GetNChildrenPerGeneration() - 1);
+    std::uniform_int_distribution<unsigned> distribution (0, population.size() - 1);
     for (unsigned child_n = 0; child_n < settings.GetNChildrenPerGeneration(); ++child_n) {
       parent_indices.push_back(distribution(prng));
     };
