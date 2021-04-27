@@ -4883,9 +4883,7 @@ bool ReconstructedMol::Evolve(ReconstructionSettings& settings, sqlite3_stmt* se
   if (success) {
     // std::cout << "Operation succeeded!\n";
     ++report.success_frequencies.at(operation);
-  };
-
-  while (!success) {
+  } else {
     inventory.ClearQueues();
     ++n_failures;
     // std::cout << "Operation " << operation << " failed! Retrying..." << std::endl;
@@ -4894,8 +4892,8 @@ bool ReconstructedMol::Evolve(ReconstructionSettings& settings, sqlite3_stmt* se
     };
     success = Evolve(settings, select_statement, query_results, controller, prng, inventory, report, n_failures);
   };
-  assert(success);
-  return true;
+
+  return success;
 };
 
 void ReconstructedMol::AddLabelledPseudofragment(const Pseudofragment& pseudofragment) {
