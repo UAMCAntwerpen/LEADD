@@ -84,7 +84,7 @@ class LEADD(GoalDirectedGenerator):
         scores = self.pool(joblib.delayed(scoring_function.score)(s) for s in smiles)
         return scores
 
-    def score_population(self, scoring_function):
+    def score_children(self, scoring_function):
         smiles = [individual.GetSanitizedSMILES() for individual in self.leadd.GetPopulation() if individual.IsChild()]
         scores = self.pool(joblib.delayed(scoring_function.score)(s) for s in smiles)
         individual_idx = 0
@@ -92,6 +92,16 @@ class LEADD(GoalDirectedGenerator):
             if individual.IsChild():
                 individual.SetScore(scores[individual_idx])
                 individual_idx += 1
+        assert(len(scores) == individual_idx)
+        return len(scores)
+
+    def score_population(self, scoring_function):
+        smiles = [individual.GetSanitizedSMILES() for individual in self.leadd.GetPopulation()]
+        scores = self.pool(joblib.delayed(scoring_function.score)(s) for s in smiles)
+        individual_idx = 0
+        for individual in self.leadd.GetPopulation():
+            individual.SetScore(scores[individual_idx])
+            individual_idx += 1
         assert(len(scores) == individual_idx)
         return len(scores)
 
@@ -109,6 +119,9 @@ class LEADD(GoalDirectedGenerator):
         if self.starting_population:
             population = pyLEADD.MakePopulationFromSMILES(self.starting_population)
             self.leadd.SetPopulation(population)
+
+        # Score the starting population.
+        if self.settings.ScoreFirstPopulation():
             self.score_population(scoring_function)
 
         # Design loop. Each iteration is a generation.
@@ -119,7 +132,7 @@ class LEADD(GoalDirectedGenerator):
             self.time_spend_designing += time.time() - start
             # Score the children.
             start = time.time()
-            n = self.score_population(scoring_function)
+            n = self.score_children(scoring_function)
             self.leadd.IncreaseNScoringCalls(n)
             self.n_scored_molecules += n
             self.time_spend_scoring += time.time() - start
