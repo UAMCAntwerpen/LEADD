@@ -2240,6 +2240,7 @@ ReconstructedMol::ReconstructedMol(const RDKit::ROMol& molecule, const Fragmenta
       n_ring_atoms += pseudofragment.GetSize();
     };
   };
+  TakeBricksOwnership();
   // Assign the same MolBrick immutable atom indices to the ReconstructedMol's pseudomol.
   for (const auto& [brick_schematic_idx, brick] : bricks) {
     for (const RDKit::Atom* brick_atom : brick.pseudomol.atoms()) {
