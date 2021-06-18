@@ -40,12 +40,12 @@ ReconstructionSettings::ReconstructionSettings(const std::string& settings_file,
 
     } else if (key == "ACYCLIC_FREQUENCY_GAMMA") {
       gammas["acyclic_frequency"] = std::stod(value);
-    } else if (key == "ACYCLIC_LEVEL_GAMMA") {
-      gammas["acyclic_level"] = std::stod(value);
+    } else if (key == "ACYCLIC_SIZE_GAMMA") {
+      gammas["acyclic_size"] = std::stod(value);
     } else if (key == "RING_FREQUENCY_GAMMA") {
       gammas["ring_frequency"] = std::stod(value);
-    } else if (key == "RING_LEVEL_GAMMA") {
-      gammas["ring_level"] = std::stod(value);
+    } else if (key == "RING_SIZE_GAMMA") {
+      gammas["ring_size"] = std::stod(value);
     } else if (key == "SCORE_GAMMA") {
       gammas["score"] = std::stod(value);
 
@@ -61,10 +61,10 @@ ReconstructionSettings::ReconstructionSettings(const std::string& settings_file,
       unsigned probability = std::stoi(value);
       assert(probability >= 0u);
       probabilities["peripheral_substitution"] = probability;
-    } else if (key == "PERIPHERAL_CROSSOVER_PROBABILITY") {
+    } else if (key == "PERIPHERAL_TRANSFECTION_PROBABILITY") {
       unsigned probability = std::stoi(value);
       assert(probability >= 0u);
-      probabilities["peripheral_crossover"] = probability;
+      probabilities["peripheral_transfection"] = probability;
     } else if (key == "INTERNAL_EXPANSION_PROBABILITY") {
       unsigned probability = std::stoi(value);
       assert(probability >= 0u);
@@ -77,10 +77,10 @@ ReconstructionSettings::ReconstructionSettings(const std::string& settings_file,
       unsigned probability = std::stoi(value);
       assert(probability >= 0u);
       probabilities["internal_substitution"] = probability;
-    } else if (key == "INTERNAL_CROSSOVER_PROBABILITY") {
+    } else if (key == "INTERNAL_TRANSFECTION_PROBABILITY") {
       unsigned probability = std::stoi(value);
       assert(probability >= 0u);
-      probabilities["internal_crossover"] = probability;
+      probabilities["internal_transfection"] = probability;
     } else if (key == "TRANSLATION_PROBABILITY") {
       unsigned probability = std::stoi(value);
       assert(probability >= 0u);
@@ -89,26 +89,6 @@ ReconstructionSettings::ReconstructionSettings(const std::string& settings_file,
       unsigned probability = std::stoi(value);
       assert(probability >= 0u);
       probabilities["stereo_flip"] = probability;
-    } else if (key == "RING_EXPANSION_PROBABILITY") {
-      unsigned probability = std::stoi(value);
-      assert(probability >= 0u);
-      probabilities["ring_expansion"] = probability;
-    } else if (key == "RING_DELETION_PROBABILITY") {
-      unsigned probability = std::stoi(value);
-      assert(probability >= 0u);
-      probabilities["ring_deletion"] = probability;
-    } else if (key == "RING_SUBSTITUTION_PROBABILITY") {
-      unsigned probability = std::stoi(value);
-      assert(probability >= 0u);
-      probabilities["ring_substitution"] = probability;
-    } else if (key == "RING_CROSSOVER_PROBABILITY") {
-      unsigned probability = std::stoi(value);
-      assert(probability >= 0u);
-      probabilities["ring_crossover"] = probability;
-    } else if (key == "RING_TRANSLATION_PROBABILITY") {
-      unsigned probability = std::stoi(value);
-      assert(probability >= 0u);
-      probabilities["ring_translation"] = probability;
     } else if (key == "CYCLIZATION_PROBABILITY") {
       unsigned probability = std::stoi(value);
       assert(probability >= 0u);
@@ -286,6 +266,8 @@ ReconstructionSettings::ReconstructionSettings(const std::string& settings_file,
       ss << "ERROR: Invalid key: '" << key << "'." << std::endl;
       throw std::runtime_error(ss.str());
     };
+    line.clear();
+    key.clear();
     value.clear();
   };
   input_stream.close();
@@ -366,16 +348,16 @@ float ReconstructionSettings::GetAcyclicFrequencyGamma() const {
   return gammas.at("acyclic_frequency");
 };
 
-float ReconstructionSettings::GetAcyclicLevelGamma() const {
-  return gammas.at("acyclic_level");
+float ReconstructionSettings::GetAcyclicSizeGamma() const {
+  return gammas.at("acyclic_size");
 };
 
 float ReconstructionSettings::GetRingFrequencyGamma() const {
   return gammas.at("ring_frequency");
 };
 
-float ReconstructionSettings::GetRingLevelGamma() const {
-  return gammas.at("ring_level");
+float ReconstructionSettings::GetRingSizeGamma() const {
+  return gammas.at("ring_size");
 };
 
 float ReconstructionSettings::GetScoreGamma() const {
@@ -646,18 +628,18 @@ void ReconstructionSettings::Print() const {
   std::cout << "FRAGMENT_DATABASE_FILE: '" << fragment_database_file << "'" << std::endl;
   std::cout << "CONNECTION_QUERY_RESULTS_FILE: '" << connection_query_results_file << "'" << std::endl;
   std::cout << "ACYCLIC_FREQUENCY_GAMMA: " << gammas.at("acyclic_frequency") << std::endl;
-  std::cout << "ACYCLIC_LEVEL_GAMMA: " << gammas.at("acyclic_level") << std::endl;
+  std::cout << "ACYCLIC_SIZE_GAMMA: " << gammas.at("acyclic_size") << std::endl;
   std::cout << "RING_FREQUENCY_GAMMA: " << gammas.at("ring_frequency") << std::endl;
-  std::cout << "RING_LEVEL_GAMMA: " << gammas.at("ring_level") << std::endl;
+  std::cout << "RING_SIZE_GAMMA: " << gammas.at("ring_size") << std::endl;
   std::cout << "SCORE_GAMMA: " << gammas.at("score") << std::endl;
   std::cout << "PERIPHERAL_EXPANSION_PROBABILITY: " << probabilities.at("peripheral_expansion") << std::endl;
   std::cout << "PERIPHERAL_DELETION_PROBABILITY: " << probabilities.at("peripheral_deletion") << std::endl;
   std::cout << "PERIPHERAL_SUBSTITUTION_PROBABILITY: " << probabilities.at("peripheral_substitution") << std::endl;
-  std::cout << "PERIPHERAL_CROSSOVER_PROBABILITY: " << probabilities.at("peripheral_crossover") << std::endl;
+  std::cout << "PERIPHERAL_TRANSFECTION_PROBABILITY: " << probabilities.at("peripheral_transfection") << std::endl;
   std::cout << "INTERNAL_EXPANSION_PROBABILITY: " << probabilities.at("internal_expansion") << std::endl;
   std::cout << "INTERNAL_DELETION_PROBABILITY: " << probabilities.at("internal_deletion") << std::endl;
   std::cout << "INTERNAL_SUBSTITUTION_PROBABILITY: " << probabilities.at("internal_substitution") << std::endl;
-  std::cout << "INTERNAL_CROSSOVER_PROBABILITY: " << probabilities.at("internal_crossover") << std::endl;
+  std::cout << "INTERNAL_TRANSFECTION_PROBABILITY: " << probabilities.at("internal_transfection") << std::endl;
   std::cout << "TRANSLATION_PROBABILITY: " << probabilities.at("translation") << std::endl;
   std::cout << "STEREO_FLIP_PROBABILITY: " << probabilities.at("stereo_flip") << std::endl;
   std::cout << "PRNG_SEED: " << prng_seed << std::endl;

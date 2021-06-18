@@ -11,7 +11,6 @@
 #include <GraphMol/Depictor/RDDepictor.h>
 #include "H5Cpp.h"
 #include "Graph.hpp"
-#include "PseudofragmentDB.hpp"
 #include "ConnectionQueryResults.hpp"
 #include "ReconstructionSettings.hpp"
 #include "Fragmentation.hpp"
@@ -42,7 +41,8 @@ extern const unsigned reconstruction_version;
 extern bool molpickler_configured;
 
 // Declaration of a function to configure the RDKit::MolPickler to pickle RDKit::Atom properties.
-void ConfigureMolpickler();
+void ConfigureMolPickler();
+
 
 class SizeController {
     // Maximum value covered by the discrete distribution
@@ -63,19 +63,20 @@ class SizeController {
 
   public:
     // Don't use the default constructor! It's provided only to be able to
-    // initialize the class without using initializer lists.
+    // initialize the class temporarily as a class member.
     SizeController();
     SizeController(unsigned max_size, float mean, float stdev, float peak);
+    int Decide(unsigned size, bool can_stay_constant, bool can_grow, bool can_shrink, std::mt19937& prng);
     int Decide(unsigned size, std::mt19937& prng);
     bool DecideChange(unsigned size, std::mt19937& prng);
     bool DecideGrowth(unsigned size, std::mt19937& prng);
+    bool DecideShrinkage(unsigned size, std::mt19937& prng);
 
   private:
     float NormalProbabilityDensity(unsigned size) const;
     float LogisticValue(unsigned size) const;
-
-  friend class ReconstructedMol;
 };
+
 
 class EvolutionReport {
     std::filesystem::path directory;
@@ -87,14 +88,14 @@ class EvolutionReport {
       {"peripheral_expansion", 0},    {"internal_expansion", 0},
       {"peripheral_deletion", 0},     {"internal_deletion", 0},
       {"peripheral_substitution", 0}, {"internal_substitution", 0},
-      {"peripheral_crossover", 0},    {"internal_crossover", 0},
+      {"peripheral_transfection", 0}, {"internal_transfection", 0},
       {"translation", 0},             {"stereo_flip", 0}
     };
     std::map<std::string, unsigned> success_frequencies{
       {"peripheral_expansion", 0},    {"internal_expansion", 0},
       {"peripheral_deletion", 0},     {"internal_deletion", 0},
       {"peripheral_substitution", 0}, {"internal_substitution", 0},
-      {"peripheral_crossover", 0},    {"internal_crossover", 0},
+      {"peripheral_transfection", 0}, {"internal_transfection", 0},
       {"translation", 0},             {"stereo_flip", 0}
     };
 
@@ -112,21 +113,22 @@ class EvolutionReport {
   friend class ReconstructedMol;
 };
 
+
 class MolBrick : public Pseudofragment {
-  unsigned pseudofragment_id = 0u;
-  unsigned max_atom_idx = 0u, schematic_idx = 0u;
+  unsigned pseudofragment_id = 0;
+  unsigned max_atom_idx = 0, schematic_idx = 0;
   std::vector<unsigned> atom_indices;
   // The weight of the MolBrick is the weight of the source
   // Pseudofragment based on its frequency in the database
   // and its size.
-  float weight = 0.0f;
+  float weight = 0.0;
   ReconstructedMol* owner = nullptr;
 
 public:
   MolBrick();
-  MolBrick(const Pseudofragment& pseudofragment, unsigned pseudofragment_id, unsigned schidx = 0, float wgt = 0, ReconstructedMol* owner = nullptr);
+  // MolBrick(const Pseudofragment& pseudofragment, unsigned pseudofragment_id, unsigned schidx = 0, float wgt = 0, ReconstructedMol* owner = nullptr);
   MolBrick(const Pseudofragment& pseudofragment, unsigned pseudofragment_id, unsigned start_atom_idx = 0, unsigned schidx = 0, float wgt = 0, ReconstructedMol* owner = nullptr);
-  MolBrick(Pseudofragment& pseudofragment, unsigned pseudofragment_id, unsigned start_atom_idx = 0, unsigned schidx = 0, float wgt = 0, ReconstructedMol* owner = nullptr);
+  // MolBrick(Pseudofragment& pseudofragment, unsigned pseudofragment_id, unsigned start_atom_idx = 0, unsigned schidx = 0, float wgt = 0, ReconstructedMol* owner = nullptr);
 
   bool operator== (const MolBrick& other) const;
 
@@ -137,7 +139,8 @@ public:
   ConnectionsTable GetAvailableConnections(std::mt19937& prng, const MolBrick* ghost_brick = nullptr, bool transfer_weights = false) const;
   ConnectionsTable GetAvailableConnections(std::mt19937& prng, const std::vector<MolBrick*>& ghost_bricks, bool transfer_weights = false) const;
 
-  void UpdateImmutableIndices(unsigned start_atom_idx);
+  void AssignImmutableAtomIndices(unsigned start_atom_idx);
+  void UpdateImmutableAtomIndices(unsigned start_atom_idx);
 
   const ReconstructedMol* GetOwner() const;
   unsigned GetFragmentID() const;
@@ -157,9 +160,14 @@ private:
   friend class DeletionPoint;
   friend class SubstitutionPoint;
   friend class ReconstructedMol;
-  friend class ReconstructionsInventory;
   friend class boost::serialization::access;
 };
+
+
+RDKit::Atom* GetAtomWithImmutableIdx(RDKit::RWMol& pseudomol, unsigned immutable_atom_idx);
+unsigned GetMutableAtomIdx(const RDKit::RWMol& pseudomol, unsigned immutable_atom_idx);
+std::vector<unsigned> GetMutableAtomIndices(const RDKit::RWMol& pseudomol, const std::vector<unsigned>& immutable_atom_indices);
+
 
 class ReconstructionSchematic {
   std::vector<std::vector<unsigned>> adjacency, start_atom_idx, end_atom_idx, start_atom_type, end_atom_type, bond_type;
@@ -201,6 +209,7 @@ private:
   friend class boost::serialization::access;
 };
 
+
 class ReconstructionsInventory {
   std::vector<MolBrick> acyclic, ring, ring_part;
   std::vector<float> acyclic_weights, ring_weights, ring_part_weights;
@@ -215,14 +224,10 @@ public:
 
   void Add(const MolBrick& brick);
   void Add(const ReconstructedMol& reconstruction);
-  void Add(const ReconstructedMol* reconstruction);
   void Remove(const MolBrick& brick);
   void Remove(const ReconstructedMol& reconstruction);
-  void Remove(const ReconstructedMol* reconstruction);
 
-  void SubmitToAdditionQueue(const MolBrick* brick);
   void SubmitToAdditionQueue(const MolBrick& brick);
-  void SubmitToDeletionQueue(const MolBrick* brick);
   void SubmitToDeletionQueue(const MolBrick& brick);
   void ClearQueues();
   void CommitQueuedOperations();
@@ -242,9 +247,34 @@ public:
   const std::vector<float>& GetRingPartBrickWeights() const;
   const std::vector<float>& GetAcyclicBrickWeights() const;
 
+  bool Contains(const MolBrick& brick) const;
+  bool Contains(const ReconstructedMol& reconstruction) const;
+
+  void Print() const;
+
   friend class SubstitutionPoint;
   friend class ReconstructedMol;
 };
+
+
+template <class T>
+void AdvanceCombinations(const std::vector<T>& elements, std::vector<T>& combination, size_t start, size_t end, size_t index, size_t k, std::vector<std::vector<T>>& combinations) {
+  if (index == k) {
+    combinations.push_back(combination);
+    return;
+  };
+  for (size_t i = start; (i <= end) && (end - i + 1 >= k - index); ++i) {
+    combination[index] = elements[i];
+    AdvanceCombinations(elements, combination, i + 1, end, index + 1, k, combinations);
+  };
+};
+
+template <class T>
+void Combinations(const std::vector<T>& elements, size_t k, std::vector<std::vector<T>>& combinations) {
+  std::vector<T> combination(k);
+  AdvanceCombinations(elements, combination, 0, elements.size() - 1, 0, k, combinations);
+};
+
 
 class DeletionPoint {
   MolBrick* deletable;
@@ -267,6 +297,7 @@ public:
 
   friend class ReconstructedMol;
 };
+
 
 class SubstitutionPoint {
   MolBrick* substitutable;
@@ -407,6 +438,9 @@ public:
 };
 
 
+std::tuple<bool, bool, bool> EvaluateConnectionsTableFragmentCompatibility(const ConnectionsTable& connections, const ConnectionQueryResults& query_results);
+
+
 class ReconstructedMol {
   unsigned id = 0;
   RDKit::RWMol pseudomol;
@@ -417,7 +451,7 @@ class ReconstructedMol {
   std::unordered_map<unsigned, MolBrick> bricks;
   ReconstructionSchematic schematic;
 
-  unsigned level = 0, n_ring_atoms = 0, max_atom_idx = 0, max_schematic_idx = 0;
+  unsigned n_ring_atoms = 0, max_atom_idx = 0, max_schematic_idx = 0;
   std::vector<unsigned> available_schematic_idxs;
   std::vector<unsigned> chiral_center_atom_indices, stereo_bond_indices;
 
@@ -432,20 +466,22 @@ class ReconstructedMol {
 public:
   ReconstructedMol();
   ReconstructedMol(const MolBrick& brick);
+  ReconstructedMol(const RDKit::ROMol& molecule, const FragmentationSettings& settings, bool names_as_scores = false);
 
-  bool PeripheralExpansion(sqlite3_stmt* select_statement, ConnectionQueryResults& query_results, SizeController& controller, std::mt19937& prng, bool guided = false, bool update_stereo = false);
-  bool InternalExpansion(sqlite3_stmt* select_statement, ConnectionQueryResults& query_results, SizeController& controller, std::mt19937& prng, bool guided = false, bool update_stereo = false);
+  bool PeripheralExpansion(const PseudofragmentDB& database, ConnectionQueryResults& query_results, SizeController& controller, std::mt19937& prng, bool guided = false, bool update_stereo = false);
+  bool InternalExpansion(const PseudofragmentDB& database, ConnectionQueryResults& query_results, SizeController& controller, std::mt19937& prng, bool guided = false, bool update_stereo = false);
   bool PeripheralDeletion(SizeController& controller, std::mt19937& prng, bool guided = false, bool update_stereo = false);
   bool InternalDeletion(ConnectionQueryResults& query_results, SizeController& controller, std::mt19937& prng, bool guided = false, bool update_stereo = false);
-  bool Substitution(const std::string& location, sqlite3_stmt* select_statement, ConnectionQueryResults& query_results, SizeController& controller, std::mt19937& prng, bool guided = false, bool update_stereo = false);
-  bool Crossover(const std::string& location, ConnectionQueryResults& query_results, SizeController& controller, std::mt19937& prng, ReconstructionsInventory& inventory, bool guided = false, bool update_stereo = false);
+  bool Substitution(const std::string& location, const PseudofragmentDB& database, ConnectionQueryResults& query_results, SizeController& controller, std::mt19937& prng, bool guided = false, bool update_stereo = false);
+  bool Transfection(const std::string& location, ConnectionQueryResults& query_results, SizeController& controller, std::mt19937& prng, ReconstructionsInventory& inventory, bool guided = false, bool update_stereo = false);
   bool Translation(ConnectionQueryResults& query_results, std::mt19937& prng, bool guided = false, bool update_stereo = false);
   bool StereoFlip(std::mt19937& prng);
-  bool Evolve(ReconstructionSettings& settings, sqlite3_stmt* select_statement, ConnectionQueryResults& query_results, SizeController& controller, std::mt19937& prng, ReconstructionsInventory& inventory, EvolutionReport& report, unsigned n_failures = 0);
+  bool Evolve(ReconstructionSettings& settings, const PseudofragmentDB& database, ConnectionQueryResults& query_results, SizeController& controller, std::mt19937& prng, ReconstructionsInventory& inventory, EvolutionReport& report, unsigned n_failures = 0);
 
   void SetID(unsigned new_id);
   void TakeBricksOwnership();
   std::pair<Connection, bool> HasKnownConnections(const ConnectionQueryResults& query_results) const;
+  bool ObeysConnectionCompatibilityRules(const ConnectionCompatibilities& compatibilities) const;
   void AssignWeightsToConnections(ConnectionQueryResults& query_results);
   bool AllConnectionsHaveWeights() const;
   void ClearConnectionWeights();
@@ -455,12 +491,11 @@ public:
 
   void Sanitize();
   void AssignUnspecifiedStereochemistry(std::mt19937& prng);
-  void GenerateSMILES();
+  void GenerateConnectionEncodingSMILES();
   void GenerateSanitizedSMILES();
   void GenerateFingerprint();
   float Score(const RDKit::SparseIntVect<std::uint32_t>* reference);
   double GetSimilarity(ReconstructedMol& reconstruction);
-  bool StereoIsUpdated() const;
 
   unsigned GetID() const;
   const RDKit::RWMol& GetPseudomol() const;
@@ -470,14 +505,15 @@ public:
   const std::unordered_map<unsigned, MolBrick>& GetBricks() const;
   const ReconstructionSchematic& GetSchematic() const;
   unsigned GetNBricks() const;
-  unsigned GetLevel() const;
+  unsigned GetSize() const;
   unsigned GetNRingAtoms() const;
   unsigned GetMaxAtomIdx() const;
   unsigned GetMaxSchematicIdx() const;
   float GetScore() const;
-  const std::string& GetSMILES();
+  const std::string& GetConnectionEncodingSMILES();
   const std::string& GetSanitizedSMILES();
   const RDKit::SparseIntVect<std::uint32_t>& GetFingerprint();
+  bool StereoIsUpdated() const;
   bool IsChild() const;
   unsigned GetParentID() const;
   void Draw(const std::string& file_path);
@@ -489,7 +525,7 @@ public:
   template <class Archive>
   void save(Archive& ar, const unsigned version = reconstruction_version) const {
     if (!molpickler_configured) {
-      ConfigureMolpickler();
+      ConfigureMolPickler();
     };
     ar << id;
     std::string pickle;
@@ -501,7 +537,7 @@ public:
     ar << connections << internal_connections;
     ar << bricks;
     ar << schematic;
-    ar << level << n_ring_atoms << max_atom_idx << max_schematic_idx;
+    ar << n_ring_atoms << max_atom_idx << max_schematic_idx;
     ar << available_schematic_idxs << chiral_center_atom_indices << stereo_bond_indices;
     ar << sanitized_mol_updated << smiles_updated << sanitized_smiles_updated << stereo_updated;
     ar << smiles << sanitized_smiles;
@@ -513,7 +549,7 @@ public:
   template <class Archive>
   void load(Archive& ar, const unsigned version = reconstruction_version) {
     if (!molpickler_configured) {
-      ConfigureMolpickler();
+      ConfigureMolPickler();
     };
     ar >> id;
     std::string pickle;
@@ -525,7 +561,7 @@ public:
     ar >> connections >> internal_connections;
     ar >> bricks;
     ar >> schematic;
-    ar >> level >> n_ring_atoms >> max_atom_idx >> max_schematic_idx;
+    ar >> n_ring_atoms >> max_atom_idx >> max_schematic_idx;
     ar >> available_schematic_idxs >> chiral_center_atom_indices >> stereo_bond_indices;
     ar >> sanitized_mol_updated >> smiles_updated >> sanitized_smiles_updated >> stereo_updated;
     ar >> smiles >> sanitized_smiles;
@@ -537,14 +573,8 @@ public:
   };
 
 private:
-  void AddLabelledPseudofragment(const Pseudofragment& pseudofragment);
-
-  int EvaluatePeripheralCompatibility(ConnectionQueryResults& query_results) const;
-  int EvaluateBrickSet(const std::vector<MolBrick*>& bricks) const;
-
-  std::pair<const Connection*, const ConnectionPoint*> ChoosePeripheralConnectionPoint(ConnectionQueryResults& query_results, bool has_ring, bool ring_part, std::mt19937& prng) const;
+  std::pair<const Connection*, const ConnectionPoint*> ChoosePeripheralConnectionPoint(const ConnectionQueryResults& query_results, bool has_ring, bool ring_part, std::mt19937& prng) const;
   std::pair<const Connection*, const ConnectionPoint*> ChoosePeripheralConnectionPoint(bool has_ring, bool ring_part, std::mt19937& prng) const;
-  MolBrick* ChooseBrickFromSet(const std::vector<MolBrick*>& bricks, bool has_ring, bool ring_part, std::mt19937& prng) const;
 
   const MolBrick* GetAtomSourceBrick(unsigned immutable_atom_idx) const;
   std::vector<MolBrick*> GetPeripheralBricks();
@@ -556,14 +586,13 @@ private:
   };
 
   friend class MolBrick;
-  friend class ReconstructionsInventory;
   friend class InsertionPoint;
   friend class SubstitutionPoint;
   friend class EvolutionGuide;
   friend class LEADD;
   friend class boost::serialization::access;
-  friend ReconstructedMol ConvertToReconstructedMol(const RDKit::ROMol& mol, bool fragment_rings, bool names_as_scores, boost::format& formatter);
 };
+
 
 class EvolutionGuide {
   // 3 buffers to store similarity data in memory are defined. Buffers 1 and 2
@@ -588,35 +617,10 @@ class EvolutionGuide {
 
 public:
   EvolutionGuide();
-  EvolutionGuide(sqlite3* database, const ReconstructionSettings& settings);
+  EvolutionGuide(const PseudofragmentDB& database, const ReconstructionSettings& settings);
   void AdjustWeights(ConnectionPoint* cpoint, float* buffer, float sign);
   void AdjustWeights(std::list<ReconstructedMol>& reconstructions, const std::set<unsigned>& survivor_ids);
   void Cleanup();
 };
-
-template <class T>
-void AdvanceCombinations(const std::vector<T>& elements, std::vector<T>& combination, size_t start, size_t end, size_t index, size_t k, std::vector<std::vector<T>>& combinations) {
-  if (index == k) {
-    combinations.push_back(combination);
-    return;
-  };
-  for (size_t i = start; (i <= end) && (end - i + 1 >= k - index); ++i) {
-    combination[index] = elements[i];
-    AdvanceCombinations(elements, combination, i + 1, end, index + 1, k, combinations);
-  };
-};
-
-template <class T>
-void Combinations(const std::vector<T>& elements, size_t k, std::vector<std::vector<T>>& combinations) {
-  std::vector<T> combination(k);
-  AdvanceCombinations(elements, combination, 0, elements.size() - 1, 0, k, combinations);
-};
-
-RDKit::Atom* GetAtomWithImmutableIdx(RDKit::RWMol& pseudomol, unsigned immutable_atom_idx);
-unsigned GetMutableAtomIdx(const RDKit::RWMol& pseudomol, unsigned immutable_atom_idx);
-std::vector<unsigned> GetMutableAtomIndices(const RDKit::RWMol& pseudomol, const std::vector<unsigned>& immutable_atom_indices);
-
-// Function to convert a RDKit::ROMol to a ReconstructedMol.
-ReconstructedMol ConvertToReconstructedMol(const RDKit::ROMol& mol, bool fragment_rings, bool names_as_scores, boost::format& formatter);
 
 #endif

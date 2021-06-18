@@ -2,64 +2,107 @@
 #ifndef _PSEUDOFRAGMENT_DB_HPP_
 #define _PSEUDOFRAGMENT_DB_HPP_
 
+#include <omp.h>
 #include <sqlite3.h>
+#include <boost/progress.hpp>
 #include "Pseudofragment.hpp"
 
-// Function to initialize a Pseudofragment database with the correct schema.
-sqlite3* InitializePseudofragmentDB(const std::string& output);
-
-// Function to insert a source molecule (as a SMILES string) into the database.
-// Returns the database ID of the inserted source molecule.
-sqlite3_int64 InsertSourceMolInDB(std::string smiles, sqlite3* database, sqlite3_stmt* statement);
-
-// Function to insert a Pseudofragment into the database.
-void InsertPseudofragmentInDB(const Pseudofragment& pseudofragment, sqlite3_stmt* statement);
-
-// Function to insert a Connection into the database.
-void InsertConnectionsInDB(const Pseudofragment& pseudofragment, sqlite3_int64 pseudofragment_id, sqlite3_stmt* insert_connection, sqlite3_stmt* select_connection_id, sqlite3_stmt* insert_pseudofragment_connection_relationship);
-
-// Function to insert a source molecule-Pseudofragment relationship into the database.
-// Returns the database ID of the Pseudofragment in question.
-sqlite3_int64 InsertSourcePseudofragmentRelationshipInDB(sqlite3_int64 source_id, const Pseudofragment& pseudofragment, sqlite3_stmt* select_statement, sqlite3_stmt* insert_statement);
-
-// Function to retrieve a Pseudofragment from the database by its database ID.
-Pseudofragment GetPseudofragmentByIDFromDB(unsigned id, sqlite3_stmt* select_statement);
-
-// Function to retrieve the total number of Pseudofragments in the database.
-unsigned GetPseudofragmentCount(sqlite3* database);
-
-// Class to iterate over a Pseudofragment database and deserialize the
-// Pseudofragments.
-class PseudofragmentIterator {
-  // SQLite3 statement used to create the iterator.
-  sqlite3_stmt* statement;
-  // Binary string to store the serialized Pseudofragment.
-  std::stringstream blob;
-  // Size of the binary string.
-  int blob_size = 0;
-  // Last accessed Pseudofragment
-  Pseudofragment pseudofragment;
-  // ID of the last accessed Pseudofragment.
-  unsigned id = 0;
-  // Integer recording the last SQLite3 result code.
-  int result_code;
+class PseudofragmentDB {
+  std::string database_path;
+  sqlite3* database;
+  sqlite3_stmt* select_n_pseudofragments;
+  sqlite3_stmt* select_n_connections;
+  sqlite3_stmt* select_source_molecule_id;
+  sqlite3_stmt* select_pseudofragment_id;
+  sqlite3_stmt* select_connection_id;
+  sqlite3_stmt* select_connection;
+  sqlite3_stmt* select_pseudofragment;
+  sqlite3_stmt* insert_source_molecule;
+  sqlite3_stmt* insert_pseudofragment;
+  sqlite3_stmt* insert_connection;
+  sqlite3_stmt* insert_source_pseudofragment_relationship;
+  sqlite3_stmt* insert_pseudofragment_connection_relationship;
 
 public:
-  PseudofragmentIterator(sqlite3* database);
-  PseudofragmentIterator(sqlite3* database, unsigned start_idx, unsigned end_idx);
+  PseudofragmentDB(const std::string& database_path);
 
-  // Iterator dereferencing operators.
-  const Pseudofragment& operator*() const;
-  const Pseudofragment* operator->() const;
+  void BeginTransaction() const;
+  void CommitTransaction() const;
+  void Optimize() const;
+  void Close() const;
 
-  // Operator to advance the iterator by 1.
-  void operator++();
+  sqlite3_int64 SelectSourceMoleculeID(const std::string& smiles) const;
+  sqlite3_int64 SelectSourceMoleculeID(const RDKit::ROMol& molecule) const;
+  sqlite3_int64 SelectPseudofragmentID(const std::string& smiles, bool ring_part) const;
+  sqlite3_int64 SelectPseudofragmentID(const Pseudofragment& pseudofragment) const;
+  sqlite3_int64 SelectConnectionID(std::uint32_t start_atom_type, std::uint32_t end_atom_type, std::uint32_t bond_type) const;
+  sqlite3_int64 SelectConnectionID(const Connection& connection) const;
+  std::pair<Connection, unsigned> SelectConnectionWithID(sqlite3_int64 connection_id) const;
+  std::pair<Pseudofragment, unsigned> SelectPseudofragmentWithID(sqlite3_int64 pseudofragment_id) const;
+  sqlite3_int64 GetNPseudofragments() const;
+  sqlite3_int64 GetNConnections() const;
 
-  unsigned GetID() const;
-  int GetResultCode() const;
+  sqlite3_int64 InsertSourceMolecule(const std::string& smiles) const;
+  sqlite3_int64 InsertSourceMolecule(const RDKit::ROMol& molecule) const;
+  sqlite3_int64 InsertPseudofragment(const Pseudofragment& pseudofragment) const;
+  sqlite3_int64 InsertConnection(const Connection& connection) const;
+  void InsertSourceMoleculePseudofragmentRelationship(sqlite3_int64 source_molecule_id, sqlite3_int64 pseudofragment_id) const;
+  void InsertPseudofragmentConnectionRelationship(sqlite3_int64 pseudofragment_id, sqlite3_int64 connection_id, unsigned frequency) const;
 
-  // Function to reset the iterator to its starting position.
-  void Reset();
+  sqlite3* GetDatabaseConnection() const;
+
+  class PseudofragmentIterator {
+	private:
+		sqlite3_stmt* select_pseudofragments;
+    int sqlite3_result_code = 0;
+		sqlite3_int64 pseudofragment_id = 0;
+    Pseudofragment pseudofragment;
+    unsigned pseudofragment_frequency = 0;
+
+	public:
+    PseudofragmentIterator(const PseudofragmentDB& pseudofragment_db, sqlite3_int64 begin_id = 1, sqlite3_int64 end_id = 0);
+		const Pseudofragment& operator*() const;
+		PseudofragmentIterator& operator++();
+		PseudofragmentIterator operator++(int);
+		bool AtEnd() const;
+    sqlite3_int64 GetPseudofragmentID() const;
+    const Pseudofragment& GetPseudofragment() const;
+    unsigned GetPseudofragmentFrequency() const;
+		void Finalize() const;
+	};
+
+  class ConnectionIterator {
+  private:
+    sqlite3_stmt* select_connections;
+    int sqlite3_result_code = 0;
+    sqlite3_int64 connection_id = 0;
+    Connection connection;
+    unsigned connection_frequency = 0;
+
+  public:
+    ConnectionIterator(const PseudofragmentDB& pseudofragment_db, sqlite3_int64 begin_id = 1, sqlite3_int64 end_id = 0);
+    const Connection& operator*() const;
+    ConnectionIterator& operator++();
+    ConnectionIterator operator++(int);
+    bool AtEnd() const;
+    sqlite3_int64 GetConnectionID() const;
+    const Connection& GetConnection() const;
+    unsigned GetConnectionFrequency() const;
+    void Finalize() const;
+  };
+
+private:
+  void Open();
+  bool TablesExist() const;
+  void InitializeTables() const;
+  void PrepareStatements();
+  void FinalizeStatements() const;
 };
+
+// Function to determine the number of OpenMP threads to use.
+int DetermineOMPNThreads();
+
+// Function to divide a range of size N into equally sized chunks.
+std::vector<std::pair<unsigned, unsigned>> EquallySizedChunks(unsigned size, unsigned n_chunks, bool one_based_index = false);
 
 #endif

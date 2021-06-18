@@ -1,184 +1,453 @@
 #include "ConnectionQueryResults.hpp"
 
 // Definition of the version integer of the ConnectionQueryResults class.
-extern const unsigned connection_query_results_version = 20200306;
+extern const unsigned connection_query_results_version = 20210615;
 
 // Class ConnectionQueryResults
 ConnectionQueryResults::ConnectionQueryResults() = default;
-ConnectionQueryResults::ConnectionQueryResults(const ConnectionCompatibilities & compatibilities, sqlite3 * database, float acyclic_frequency_gamma, float acyclic_level_gamma, float ring_frequency_gamma, float ring_level_gamma) :
-  compatibilities(compatibilities),
+ConnectionQueryResults::ConnectionQueryResults(const PseudofragmentDB& database, unsigned stringency, float acyclic_frequency_gamma, float acyclic_size_gamma, float ring_frequency_gamma, float ring_size_gamma) :
+  compatibilities(database, stringency),
   acyclic_frequency_gamma(acyclic_frequency_gamma),
-  acyclic_level_gamma(acyclic_level_gamma),
+  acyclic_size_gamma(acyclic_size_gamma),
   ring_frequency_gamma(ring_frequency_gamma),
-  ring_level_gamma(ring_level_gamma) {
+  ring_size_gamma(ring_size_gamma) {
   CalculateStrictQueryResults(database);
   CalculateQueryResults(database);
 };
 
-void ConnectionQueryResults::CalculateQueryResults(sqlite3* database) {
-  assert(acyclic.empty());
-  assert(ring.empty());
-  assert(ring_part.empty());
-  // Prepare the required SQLite3 statements.
-  sqlite3_stmt* select_n_pseudofragments;
-  sqlite3_stmt* select_pseudofragments;
-  sqlite3_prepare_v2(database, "SELECT id, ring_part, has_ring, level, pickle, pickle_size, frequency FROM pseudofragments", -1, &select_pseudofragments, NULL);
-  sqlite3_prepare_v2(database, "SELECT COUNT(*) FROM pseudofragments", -1, &select_n_pseudofragments, NULL);
-  // Determine the number of Pseudofragments in the database.
-  sqlite3_step(select_n_pseudofragments);
-  unsigned n_pseudofragments = sqlite3_column_int64(select_n_pseudofragments, 0);
-  // Initialize a progress bar.
-  boost::progress_display progress(n_pseudofragments);
-  // Initialize a ConnectionQueryResults template.
-  CONNECTION_QUERY_RESULTS template_query_results;
-  for (const auto& c : compatibilities.GetCompatibilityTable()) {
-    const Connection& connection = c.first;
-    template_query_results.insert({ connection, QUERY_RESULTS_BY_NUM{{1, QUERY_RESULT{}}} });
+void ConnectionQueryResults::CalculateStrictQueryResults(const PseudofragmentDB& database) {
+  // Ensure the containers are empty.
+  strict_acyclic.clear();
+  strict_ring.clear();
+  strict_ring_part.clear();
+  // Initialize the containers with the appropiate structure.
+  for (const auto& [connection, compatible_connections] : compatibilities.GetCompatibilityTable()) {
+    strict_acyclic.insert({ connection, QUERY_RESULTS_BY_NUM{} });
   };
-  // Assign to the member variables the structure of the template.
-  acyclic = template_query_results;
-  ring = template_query_results;
-  ring_part = template_query_results;
-  // Loop over the Pseudofragments in the database and retrieve their data.
-  std::stringstream blob;
-  int rc = sqlite3_step(select_pseudofragments);
-  while (rc == SQLITE_ROW) {
-    int id = sqlite3_column_int64(select_pseudofragments, 0);
-    int rpart = sqlite3_column_int(select_pseudofragments, 1);
-    int has_ring = sqlite3_column_int(select_pseudofragments, 2);
-    int level = sqlite3_column_int(select_pseudofragments, 3);
-    int blob_size = sqlite3_column_int(select_pseudofragments, 5);
-    int frequency = sqlite3_column_int(select_pseudofragments, 6);
-    // Deserialize the Pseudofragment.
-    Pseudofragment pseudofragment;
-    blob.write((const char*)sqlite3_column_blob(select_pseudofragments, 4), blob_size);
-    boost::archive::binary_iarchive archive(blob);
-    pseudofragment.load(archive);
-    // Loop over the Connections in the database and check if the Pseudofragment
-    // is compatible with them.
-    const ConnectionsTable& pseudofragment_connections = pseudofragment.GetConnections();
-    for (const auto& c : template_query_results) {
-      const Connection& connection = c.first;
-      if (pseudofragment_connections.IsCompatibleWith(connection, compatibilities)) {
-        if (rpart) {
-          QUERY_RESULT& query_result = ring_part[connection][1];
-          query_result.first.push_back(id);
-          query_result.second.push_back(std::pow(frequency, acyclic_frequency_gamma) * std::pow(level, acyclic_level_gamma));
-        } else if (has_ring) {
-          QUERY_RESULT& query_result = ring[connection][1];
-          query_result.first.push_back(id);
-          query_result.second.push_back(std::pow(frequency, ring_frequency_gamma) * std::pow(level, ring_level_gamma));
-        } else {
-          QUERY_RESULT& query_result = acyclic[connection][1];
-          query_result.first.push_back(id);
-          query_result.second.push_back(std::pow(frequency, acyclic_frequency_gamma) * std::pow(level, acyclic_level_gamma));
+  strict_ring = strict_acyclic;
+  strict_ring_part = strict_acyclic;
+  // Determine the number of OpenMP threads to use.
+  int n_threads = DetermineOMPNThreads();
+  omp_set_num_threads(n_threads);
+  // Divide the input file into N equally sized chunks, where N is the number of
+  // OpenMP threads.
+  sqlite3_int64 n_connections = database.GetNConnections();
+  std::vector<std::pair<unsigned, unsigned>> database_chunks = EquallySizedChunks(n_connections, n_threads, true);
+  // Initialize a progress bar.
+  std::cout << "Calculating ConnectionQueryResults according to the strict compatibility definition..." << std::endl;
+  boost::progress_display progress(n_connections);
+  #pragma omp parallel for
+  for (int thrid = 0; thrid < n_threads; ++thrid) {
+    // Prepare the necessary SQLite3 statements.
+    sqlite3_stmt* select_connection_id;
+    sqlite3_stmt* select_max_connection_frequency;
+    sqlite3_stmt* select_pseudofragments_with_connection;
+    int sqlite3_result_code = sqlite3_prepare_v2(database.GetDatabaseConnection(), "SELECT id FROM connections WHERE start_atom_type = ? AND end_atom_type = ? AND bond_type = ?", -1, &select_connection_id, nullptr);
+    assert(sqlite3_result_code == SQLITE_OK);
+    sqlite3_result_code = sqlite3_prepare_v2(database.GetDatabaseConnection(), "SELECT MAX(frequency) FROM pseudofragments_connections WHERE connection_id = ?", -1, &select_max_connection_frequency, nullptr);
+    assert(sqlite3_result_code == SQLITE_OK);
+    sqlite3_result_code = sqlite3_prepare_v2(database.GetDatabaseConnection(), "SELECT id, ring_part, has_ring, size, frequency FROM pseudofragments WHERE id IN (SELECT pseudofragment_id FROM pseudofragments_connections WHERE connection_id = ? AND frequency >= ?)", -1, &select_pseudofragments_with_connection, nullptr);
+    assert(sqlite3_result_code == SQLITE_OK);
+    // Iterate over the Connections in the database chunk.
+    const std::pair<unsigned, unsigned>& chunk = database_chunks[thrid];
+    PseudofragmentDB::ConnectionIterator chunk_it (database, chunk.first, chunk.second);
+    while (!chunk_it.AtEnd()) {
+      const Connection& connection = chunk_it.GetConnection();
+      // According to the strict compatibility definition the mirrored Connection
+      // is the only one considered compatible.
+      Connection mirrored_connection = connection.Mirror();
+      sqlite3_bind_int64(select_connection_id, 1, mirrored_connection.GetStartAtomType());
+      sqlite3_bind_int64(select_connection_id, 2, mirrored_connection.GetEndAtomType());
+      sqlite3_bind_int64(select_connection_id, 3, mirrored_connection.GetBondType());
+      sqlite3_result_code = sqlite3_step(select_connection_id);
+      assert(sqlite3_result_code == SQLITE_ROW);
+      sqlite3_int64 mirrored_connection_id = sqlite3_column_int64(select_connection_id, 0);
+      sqlite3_clear_bindings(select_connection_id);
+      sqlite3_reset(select_connection_id);
+      // Determine the maximum number of instances of the mirrored Connection on a
+      // single Pseudofragment.
+      sqlite3_bind_int64(select_max_connection_frequency, 1, mirrored_connection_id);
+      sqlite3_result_code = sqlite3_step(select_max_connection_frequency);
+      assert(sqlite3_result_code == SQLITE_ROW);
+      unsigned max_connection_frequency = sqlite3_column_int64(select_max_connection_frequency, 0);
+      sqlite3_clear_bindings(select_max_connection_frequency);
+      sqlite3_reset(select_max_connection_frequency);
+      // Iterate over the number of mirrored Connection instances.
+      QUERY_RESULTS_BY_NUM& acyclic_qrbn = strict_acyclic[connection];
+      QUERY_RESULTS_BY_NUM& ring_qrbn = strict_ring[connection];
+      QUERY_RESULTS_BY_NUM& ring_part_qrbn = strict_ring_part[connection];
+      for (unsigned connection_frequency = 1; connection_frequency <= max_connection_frequency; ++connection_frequency) {
+        // Create the containers to store the IDs and weights of Pseudofragments with
+        // N instances of the mirrored connection.
+        QUERY_RESULTS_BY_NUM::iterator qrbn_it;
+        bool inserted = false;
+        std::tie(qrbn_it, inserted) = acyclic_qrbn.insert({connection_frequency, QUERY_RESULT()});
+        QUERY_RESULT& acyclic_qr = qrbn_it->second;
+        std::tie(qrbn_it, inserted) = ring_qrbn.insert({connection_frequency, QUERY_RESULT()});
+        QUERY_RESULT& ring_qr = qrbn_it->second;
+        std::tie(qrbn_it, inserted) = ring_part_qrbn.insert({connection_frequency, QUERY_RESULT()});
+        QUERY_RESULT& ring_part_qr= qrbn_it->second;
+        // Iterate over the Pseudofragments that have at least the specified number
+        // of mirrored Connection instances.
+        sqlite3_bind_int64(select_pseudofragments_with_connection, 1, mirrored_connection_id);
+        sqlite3_bind_int64(select_pseudofragments_with_connection, 2, connection_frequency);
+        sqlite3_result_code = sqlite3_step(select_pseudofragments_with_connection);
+        while (sqlite3_result_code == SQLITE_ROW) {
+          sqlite3_int64 pseudofragment_id = sqlite3_column_int64(select_pseudofragments_with_connection, 0);
+          bool is_ring_part = sqlite3_column_int(select_pseudofragments_with_connection, 1);
+          bool has_ring = sqlite3_column_int(select_pseudofragments_with_connection, 2);
+          unsigned pseudofragment_size = sqlite3_column_int(select_pseudofragments_with_connection, 3);
+          unsigned pseudofragment_frequency = sqlite3_column_int64(select_pseudofragments_with_connection, 4);
+          // Store the Pseudofragment's ID and weight in the appropiate containers.
+          if (!has_ring && !is_ring_part) {
+            float pseudofragment_weight = std::pow(pseudofragment_frequency, acyclic_frequency_gamma) * std::pow(pseudofragment_size, acyclic_size_gamma);
+            acyclic_qr.first.push_back(pseudofragment_id);
+            acyclic_qr.second.push_back(pseudofragment_weight);
+          };
+          if (has_ring) {
+            float pseudofragment_weight = std::pow(pseudofragment_frequency, ring_frequency_gamma) * std::pow(pseudofragment_size, ring_size_gamma);
+            ring_qr.first.push_back(pseudofragment_id);
+            ring_qr.second.push_back(pseudofragment_weight);
+          };
+          if (is_ring_part) {
+            float pseudofragment_weight = std::pow(pseudofragment_frequency, ring_frequency_gamma) * std::pow(pseudofragment_size, ring_size_gamma);
+            ring_part_qr.first.push_back(pseudofragment_id);
+            ring_part_qr.second.push_back(pseudofragment_weight);
+          };
+          sqlite3_result_code = sqlite3_step(select_pseudofragments_with_connection);
         };
+        sqlite3_clear_bindings(select_pseudofragments_with_connection);
+        sqlite3_reset(select_pseudofragments_with_connection);
+      };
+      ++chunk_it;
+      #pragma omp critical
+      {
+        ++progress;
       };
     };
-    // Clear the blob and Pseudofragment and move on to the next fragment.
-    blob.str(std::string());
-    blob.clear();
-    ++progress;
-    rc = sqlite3_step(select_pseudofragments);
+    // Finalize all SQLite3 statements.
+    chunk_it.Finalize();
+    sqlite3_result_code = sqlite3_finalize(select_connection_id);
+    assert(sqlite3_result_code == SQLITE_OK);
+    sqlite3_result_code = sqlite3_finalize(select_max_connection_frequency);
+    assert(sqlite3_result_code == SQLITE_OK);
+    sqlite3_result_code = sqlite3_finalize(select_pseudofragments_with_connection);
+    assert(sqlite3_result_code == SQLITE_OK);
   };
-  // Destroy the SQLite3 statements to avoid memory leaks.
-  sqlite3_finalize(select_n_pseudofragments);
-  sqlite3_finalize(select_pseudofragments);
+  // // Prepare the necessary SQLite3 statements.
+  // sqlite3_stmt* select_max_connection_frequency;
+  // sqlite3_stmt* select_pseudofragments_with_connection;
+  // int sqlite3_result_code = sqlite3_prepare_v2(database.GetDatabaseConnection(), "SELECT MAX(frequency) FROM pseudofragments_connections WHERE connection_id = ?", -1, &select_max_connection_frequency, nullptr);
+  // assert(sqlite3_result_code == SQLITE_OK);
+  // sqlite3_result_code = sqlite3_prepare_v2(database.GetDatabaseConnection(), "SELECT id, ring_part, has_ring, size, frequency FROM pseudofragments WHERE id IN (SELECT pseudofragment_id FROM pseudofragments_connections WHERE connection_id = ? AND frequency >= ?)", -1, &select_pseudofragments_with_connection, nullptr);
+  // assert(sqlite3_result_code == SQLITE_OK);
+  // // Iterate over the Connections in the database.
+  // std::cout << "Calculating ConnectionQueryResults according to the strict compatibility definition..." << std::endl;
+  // for (const auto& [connection, compatible_connections] : compatibilities.GetCompatibilityTable()) {
+  //   CONNECTION_QUERY_RESULTS::iterator cqr_it;
+  //   bool inserted = false;
+  //   // Create the containers to store the IDs and weights of compatible Pseudofragments.
+  //   std::tie(cqr_it, inserted) = strict_acyclic.insert({connection, QUERY_RESULTS_BY_NUM()});
+  //   QUERY_RESULTS_BY_NUM& acyclic_qresults = cqr_it->second;
+  //   std::tie(cqr_it, inserted) = strict_ring.insert({connection, QUERY_RESULTS_BY_NUM()});
+  //   QUERY_RESULTS_BY_NUM& ring_qresults = cqr_it->second;
+  //   std::tie(cqr_it, inserted) = strict_ring_part.insert({connection, QUERY_RESULTS_BY_NUM()});
+  //   QUERY_RESULTS_BY_NUM& ring_part_qresults = cqr_it->second;
+  //   // According to the strict compatibility definition the mirrored Connection
+  //   // is the only one considered compatible.
+  //   Connection mirrored_connection = connection.Mirror();
+  //   sqlite3_int64 mirrored_connection_id = database.SelectConnectionID(mirrored_connection);
+  //   // Determine the maximum number of instances of the mirrored Connection on a
+  //   // single Pseudofragment.
+  //   sqlite3_bind_int64(select_max_connection_frequency, 1, mirrored_connection_id);
+  //   sqlite3_result_code = sqlite3_step(select_max_connection_frequency);
+  //   assert(sqlite3_result_code == SQLITE_ROW);
+  //   unsigned max_connection_frequency = sqlite3_column_int(select_max_connection_frequency, 0);
+  //   assert(max_connection_frequency > 0);
+  //   sqlite3_clear_bindings(select_max_connection_frequency);
+  //   sqlite3_reset(select_max_connection_frequency);
+  //   // Iterate over the number of mirrored Connection instances.
+  //   for (unsigned connection_frequency = 1; connection_frequency <= max_connection_frequency; ++connection_frequency) {
+  //     // Create the containers to store the IDs and weights of Pseudofragments with
+  //     // N instances of the mirrored connection.
+  //     QUERY_RESULTS_BY_NUM::iterator qrbn_it;
+  //     std::tie(qrbn_it, inserted) = acyclic_qresults.insert({connection_frequency, QUERY_RESULT()});
+  //     QUERY_RESULT& acyclic_qresult = qrbn_it->second;
+  //     std::tie(qrbn_it, inserted) = ring_qresults.insert({connection_frequency, QUERY_RESULT()});
+  //     QUERY_RESULT& ring_qresult = qrbn_it->second;
+  //     std::tie(qrbn_it, inserted) = ring_part_qresults.insert({connection_frequency, QUERY_RESULT()});
+  //     QUERY_RESULT& ring_part_qresult = qrbn_it->second;
+  //     // Iterate over the Pseudofragments that have at least the specified number
+  //     // of mirrored Connection instances.
+  //     sqlite3_bind_int64(select_pseudofragments_with_connection, 1, mirrored_connection_id);
+  //     sqlite3_bind_int64(select_pseudofragments_with_connection, 2, connection_frequency);
+  //     sqlite3_result_code = sqlite3_step(select_pseudofragments_with_connection);
+  //     while (sqlite3_result_code == SQLITE_ROW) {
+  //       sqlite3_int64 pseudofragment_id = sqlite3_column_int64(select_pseudofragments_with_connection, 0);
+  //       bool is_ring_part = sqlite3_column_int(select_pseudofragments_with_connection, 1);
+  //       bool has_ring = sqlite3_column_int(select_pseudofragments_with_connection, 2);
+  //       unsigned pseudofragment_size = sqlite3_column_int(select_pseudofragments_with_connection, 3);
+  //       unsigned pseudofragment_frequency = sqlite3_column_int(select_pseudofragments_with_connection, 4);
+  //       // Store the Pseudofragment's ID and weight in the appropiate containers.
+  //       if (!has_ring && !is_ring_part) {
+  //         float pseudofragment_weight = std::pow(pseudofragment_frequency, acyclic_frequency_gamma) * std::pow(pseudofragment_size, acyclic_size_gamma);
+  //         acyclic_qresult.first.push_back(pseudofragment_id);
+  //         acyclic_qresult.second.push_back(pseudofragment_weight);
+  //       };
+  //       if (has_ring) {
+  //         float pseudofragment_weight = std::pow(pseudofragment_frequency, ring_frequency_gamma) * std::pow(pseudofragment_size, ring_size_gamma);
+  //         ring_qresult.first.push_back(pseudofragment_id);
+  //         ring_qresult.second.push_back(pseudofragment_weight);
+  //       };
+  //       if (is_ring_part) {
+  //         float pseudofragment_weight = std::pow(pseudofragment_frequency, ring_frequency_gamma) * std::pow(pseudofragment_size, ring_size_gamma);
+  //         ring_part_qresult.first.push_back(pseudofragment_id);
+  //         ring_part_qresult.second.push_back(pseudofragment_weight);
+  //       };
+  //       sqlite3_result_code = sqlite3_step(select_pseudofragments_with_connection);
+  //     };
+  //     sqlite3_clear_bindings(select_pseudofragments_with_connection);
+  //     sqlite3_reset(select_pseudofragments_with_connection);
+  //   };
+  // };
+  // // Finalize the SQLite3 statements.
+  // sqlite3_result_code = sqlite3_finalize(select_max_connection_frequency);
+  // assert(sqlite3_result_code == SQLITE_OK);
+  // sqlite3_result_code = sqlite3_finalize(select_pseudofragments_with_connection);
+  // assert(sqlite3_result_code == SQLITE_OK);
 };
 
-void ConnectionQueryResults::CalculateStrictQueryResults(sqlite3* database) {
-  assert(strict_acyclic.empty());
-  assert(strict_ring.empty());
-  assert(strict_ring_part.empty());
-  // Set up a Connection string formatter.
-  boost::format formatter("(%d, %d, %d)");
-  // Prepare the required SQLite3 statements.
-  sqlite3_stmt* select_connection_id;
-  sqlite3_stmt* select_max_connection_freq;
-  sqlite3_stmt* select_pseudofragments_with_connection;
-  sqlite3_prepare_v2(database, "SELECT id FROM connections WHERE start_atom_type = ? AND end_atom_type = ? AND bond_type = ?", -1, &select_connection_id, NULL);
-  sqlite3_prepare_v2(database, "SELECT MAX(frequency) FROM pseudofragments_connections WHERE connection_id = ?", -1, &select_max_connection_freq, NULL);
-  sqlite3_prepare_v2(database, "SELECT id, ring_part, has_ring, level, frequency FROM pseudofragments WHERE id IN (SELECT pseudofragment_id FROM pseudofragments_connections WHERE connection_id = ? AND frequency >= ?)", -1, &select_pseudofragments_with_connection, NULL);
-  // Initialize empty containers to store the query results.
-  QUERY_RESULT acyclic_qresult, ring_qresult, ring_part_qresult;
-  std::pair<CONNECTION_QUERY_RESULTS::iterator, bool> it_bool_pair;
-  // Loop over the databases Connections.
-  for (const auto& c : compatibilities.GetCompatibilityTable()) {
-    const Connection& connection = c.first;
-    // Mirror the Connection. The mirrored Connection is the only
-    // one considered compatible with the original connection.
-    Connection mirrored_connection = connection.Mirror(formatter);
-    // Create empty entries in the ConnectionQueryResults corresponding
-    // to the current Connection.
-    it_bool_pair = strict_acyclic.emplace(connection, QUERY_RESULTS_BY_NUM());
-    QUERY_RESULTS_BY_NUM& acyclic_qresults = it_bool_pair.first->second;
-    it_bool_pair = strict_ring.emplace(connection, QUERY_RESULTS_BY_NUM());
-    QUERY_RESULTS_BY_NUM& ring_qresults = it_bool_pair.first->second;
-    it_bool_pair = strict_ring_part.emplace(connection, QUERY_RESULTS_BY_NUM());
-    QUERY_RESULTS_BY_NUM& ring_part_qresults = it_bool_pair.first->second;
-    // Retrieve the IDs of the mirrored Connection from the database.
-    sqlite3_bind_int(select_connection_id, 1, mirrored_connection.GetStartAtomType());
-    sqlite3_bind_int(select_connection_id, 2, mirrored_connection.GetEndAtomType());
-    sqlite3_bind_int(select_connection_id, 3, mirrored_connection.GetBondType());
-    sqlite3_step(select_connection_id);
-    unsigned connection_id = sqlite3_column_int64(select_connection_id, 0);
-    // Retrieve the maximum number of occurrences of the mirrored
-    // Connection in a single Pseudofragment.
-    sqlite3_bind_int64(select_max_connection_freq, 1, connection_id);
-    sqlite3_step(select_max_connection_freq);
-    unsigned max_connection_freq = sqlite3_column_int(select_max_connection_freq, 0);
-    // Loop over the range of the number of mirrored Connection occurrences.
-    for (unsigned freq = 1; freq <= max_connection_freq; ++freq) {
-      // Retrieve the Pseudofragments that have the mirrored Connection
-      // atleast N number of times.
-      sqlite3_bind_int64(select_pseudofragments_with_connection, 1, connection_id);
-      sqlite3_bind_int(select_pseudofragments_with_connection, 2, freq);
-      int rc = sqlite3_step(select_pseudofragments_with_connection);
-      while (rc == SQLITE_ROW) {
-        unsigned id = sqlite3_column_int64(select_pseudofragments_with_connection, 0);
-        bool is_ring_part = sqlite3_column_int(select_pseudofragments_with_connection, 1);
-        bool has_ring = sqlite3_column_int(select_pseudofragments_with_connection, 2);
-        unsigned level = sqlite3_column_int(select_pseudofragments_with_connection, 3);
-        unsigned frequency = sqlite3_column_int(select_pseudofragments_with_connection, 4);
-        // Clasify the Pseudofragment depending on whether it's cyclic or not.
-        if (has_ring) {
-          ring_qresult.first.push_back(id);
-          ring_qresult.second.push_back(std::pow(frequency, ring_frequency_gamma) * std::pow(level, ring_level_gamma));
-        } else if (is_ring_part) {
-          ring_part_qresult.first.push_back(id);
-          ring_part_qresult.second.push_back(std::pow(frequency, acyclic_frequency_gamma) * std::pow(level, acyclic_level_gamma));
-        } else {
-          acyclic_qresult.first.push_back(id);
-          acyclic_qresult.second.push_back(std::pow(frequency, acyclic_frequency_gamma) * std::pow(level, acyclic_level_gamma));
-        };
-        rc = sqlite3_step(select_pseudofragments_with_connection);
-      };
-      // Store the query results.
-      acyclic_qresults.insert({ freq, std::move(acyclic_qresult) });
-      ring_qresults.insert({ freq, std::move(ring_qresult) });
-      ring_part_qresults.insert({ freq, std::move(ring_part_qresult) });
-      // Clear the containers to make space for the next query results.
-      acyclic_qresult.first.clear();
-      acyclic_qresult.second.clear();
-      ring_qresult.first.clear();
-      ring_qresult.second.clear();
-      ring_part_qresult.first.clear();
-      ring_part_qresult.second.clear();
-      // Reset the Pseudofragment select statement.
-      sqlite3_clear_bindings(select_pseudofragments_with_connection);
-      sqlite3_reset(select_pseudofragments_with_connection);
-    };
-    // Reset the Connection select statements.
-    sqlite3_clear_bindings(select_connection_id);
-    sqlite3_clear_bindings(select_max_connection_freq);
-    sqlite3_reset(select_connection_id);
-    sqlite3_reset(select_max_connection_freq);
+// void ConnectionQueryResults::CalculateQueryResults(const PseudofragmentDB& database) {
+//   // Ensure the containers are empty.
+//   acyclic.clear();
+//   ring.clear();
+//   ring_part.clear();
+//   // Initialize the containers with the appropiate structure.
+//   for (const auto& [connection, compatible_connections] : compatibilities.GetCompatibilityTable()) {
+//     acyclic.insert({ connection, QUERY_RESULTS_BY_NUM{{1, QUERY_RESULT{}}} });
+//   };
+//   ring = acyclic;
+//   ring_part = acyclic;
+//   // Determine the number of OpenMP threads to use.
+//   int n_threads = DetermineOMPNThreads();
+//   omp_set_num_threads(n_threads);
+//   // Divide the input file into N equally sized chunks, where N is the number of
+//   // OpenMP threads.
+//   sqlite3_int64 n_connections = database.GetNConnections();
+//   std::vector<std::pair<unsigned, unsigned>> database_chunks = EquallySizedChunks(n_connections, n_threads, true);
+//   // Initialize a progress bar.
+//   std::cout << "Calculating ConnectionQueryResults according to the lax compatibility definition..." << std::endl;
+//   boost::progress_display progress(n_connections);
+//   #pragma omp parallel for
+//   for (int thrid = 0; thrid < n_threads; ++thrid) {
+//     // Prepare the necessary SQLite3 statements.
+//     sqlite3_stmt* select_pseudofragments_with_connection;
+//     int sqlite3_result_code = sqlite3_prepare_v2(database.GetDatabaseConnection(), "SELECT id, ring_part, has_ring, size, frequency FROM pseudofragments WHERE id IN (SELECT pseudofragment_id FROM pseudofragments_connections WHERE start_atom_type = ? AND end_atom_type = ? AND bond_type = ?)", -1, &select_pseudofragments_with_connection, nullptr);
+//     assert(sqlite3_result_code == SQLITE_OK);
+//
+//     // Iterate over the Connections in the database chunk.
+//     const std::pair<unsigned, unsigned>& chunk = database_chunks[thrid];
+//     PseudofragmentDB::ConnectionIterator chunk_it (database, chunk.first, chunk.second);
+//     while (!chunk_it.AtEnd()) {
+//       const Connection& connection = chunk_it.GetConnection();
+//       // Initialize containers to store the compatible Pseudofragment IDs and weights.
+//       QUERY_RESULT acyclic_qr;
+//       QUERY_RESULT ring_qr;
+//       QUERY_RESULT ring_part_qr;
+//       // Iterate over the Connection's compatible Connections.
+//       const CONNECTIONS_SET& compatible_connections = compatibilities[connection];
+//       for (const Connection& compatible_connection : compatible_connections) {
+//         // Iterate over the Pseudofragments that have the compatible Connection.
+//         sqlite3_bind_int64(select_pseudofragments_with_connection, 1, compatible_connection.GetStartAtomType());
+//         sqlite3_bind_int64(select_pseudofragments_with_connection, 2, compatible_connection.GetEndAtomType());
+//         sqlite3_bind_int64(select_pseudofragments_with_connection, 3, compatible_connection.GetBondType());
+//         sqlite3_result_code = sqlite3_step(select_pseudofragments_with_connection);
+//         while (sqlite3_result_code == SQLITE_ROW) {
+//           sqlite3_int64 pseudofragment_id = sqlite3_column_int64(select_pseudofragments_with_connection, 0);
+//           bool is_ring_part = sqlite3_column_int(select_pseudofragments_with_connection, 1);
+//           bool has_ring = sqlite3_column_int(select_pseudofragments_with_connection, 2);
+//           unsigned pseudofragment_size = sqlite3_column_int(select_pseudofragments_with_connection, 3);
+//           unsigned pseudofragment_frequency = sqlite3_column_int64(select_pseudofragments_with_connection, 4);
+//           // Store the Pseudofragment's ID and weight in the appropiate containers.
+//           if (!has_ring && !is_ring_part) {
+//             float pseudofragment_weight = std::pow(pseudofragment_frequency, acyclic_frequency_gamma) * std::pow(pseudofragment_size, acyclic_size_gamma);
+//             acyclic_qr.first.push_back(pseudofragment_id);
+//             acyclic_qr.second.push_back(pseudofragment_weight);
+//           };
+//           if (has_ring) {
+//             float pseudofragment_weight = std::pow(pseudofragment_frequency, ring_frequency_gamma) * std::pow(pseudofragment_size, ring_size_gamma);
+//             ring_qr.first.push_back(pseudofragment_id);
+//             ring_qr.second.push_back(pseudofragment_weight);
+//           };
+//           if (is_ring_part) {
+//             float pseudofragment_weight = std::pow(pseudofragment_frequency, ring_frequency_gamma) * std::pow(pseudofragment_size, ring_size_gamma);
+//             ring_part_qr.first.push_back(pseudofragment_id);
+//             ring_part_qr.second.push_back(pseudofragment_weight);
+//           };
+//
+//           // Sort the QUERY_RESULTs
+//           // Unique the QUERY_RESULTs
+//           // Insert the QUERY_RESULTs
+//
+//           sqlite3_result_code = sqlite3_step(select_pseudofragments_with_connection);
+//         };
+//         sqlite3_clear_bindings(select_pseudofragments_with_connection);
+//         sqlite3_reset(select_pseudofragments_with_connection);
+//       };
+//       ++chunk_it;
+//     };
+//     chunk_it.Finalize();
+//     sqlite3_finalize(select_pseudofragments_with_connection);
+//   };
+// };
+
+void ConnectionQueryResults::CalculateQueryResults(const PseudofragmentDB& database) {
+  // Ensure the containers are empty.
+  acyclic.clear();
+  ring.clear();
+  ring_part.clear();
+  // Initialize the containers with the appropiate structure.
+  for (const auto& [connection, compatible_connections] : compatibilities.GetCompatibilityTable()) {
+    acyclic.insert({ connection, QUERY_RESULTS_BY_NUM{{1, QUERY_RESULT{}}} });
   };
-  // Destruct the SQLite3 statements to avoid memory leaks.
-  sqlite3_finalize(select_connection_id);
-  sqlite3_finalize(select_max_connection_freq);
-  sqlite3_finalize(select_pseudofragments_with_connection);
+  ring = acyclic;
+  ring_part = acyclic;
+  // Determine the number of OpenMP threads to use.
+  int n_threads = DetermineOMPNThreads();
+  omp_set_num_threads(n_threads);
+  // Divide the input file into N equally sized chunks, where N is the number of
+  // OpenMP threads.
+  sqlite3_int64 n_pseudofragments = database.GetNPseudofragments();
+  std::vector<std::pair<unsigned, unsigned>> database_chunks = EquallySizedChunks(n_pseudofragments, n_threads, true);
+  // Initialize a progress bar.
+  std::cout << "Calculating ConnectionQueryResults according to the lax compatibility definition..." << std::endl;
+  boost::progress_display progress(n_pseudofragments);
+  #pragma omp parallel for
+  for (int thrid = 0; thrid < n_threads; ++thrid) {
+    // Iterate over the Pseudofragments in the database chunk.
+    const std::pair<unsigned, unsigned>& chunk = database_chunks[thrid];
+    PseudofragmentDB::PseudofragmentIterator chunk_it (database, chunk.first, chunk.second);
+    while (!chunk_it.AtEnd()) {
+      sqlite3_int64 pseudofragment_id = chunk_it.GetPseudofragmentID();
+      unsigned pseudofragment_frequency = chunk_it.GetPseudofragmentFrequency();
+      const Pseudofragment& pseudofragment = chunk_it.GetPseudofragment();
+      unsigned pseudofragment_size = pseudofragment.GetSize();
+      const ConnectionsTable& pseudofragment_connections = pseudofragment.GetConnections();
+      // Iterate over the Connections in the database.
+      for (const auto& [connection, compatible_connections] : compatibilities.GetCompatibilityTable()) {
+        // If the Pseudofragment is compatible with the Connection record the
+        // Pseudofragment's ID and weight in the appropiate containers.
+        if (compatibilities.AreCompatible(pseudofragment_connections, connection)) {
+          if (!pseudofragment.HasRing() && !pseudofragment.IsRingPart()) {
+            QUERY_RESULT& query_result = acyclic[connection][1];
+            float pseudofragment_weight = std::pow(pseudofragment_frequency, acyclic_frequency_gamma) * std::pow(pseudofragment_size, acyclic_size_gamma);
+            #pragma omp critical
+            {
+              query_result.first.push_back(pseudofragment_id);
+              query_result.second.push_back(pseudofragment_weight);
+            };
+          };
+          if (pseudofragment.HasRing()) {
+            QUERY_RESULT& query_result = ring[connection][1];
+            float pseudofragment_weight = std::pow(pseudofragment_frequency, ring_frequency_gamma) * std::pow(pseudofragment_size, ring_size_gamma);
+            #pragma omp critical
+            {
+              query_result.first.push_back(pseudofragment_id);
+              query_result.second.push_back(pseudofragment_weight);
+            };
+          };
+          if (pseudofragment.IsRingPart()) {
+            QUERY_RESULT& query_result = ring_part[connection][1];
+            float pseudofragment_weight = std::pow(pseudofragment_frequency, ring_frequency_gamma) * std::pow(pseudofragment_size, ring_size_gamma);
+            #pragma omp critical
+            {
+              query_result.first.push_back(pseudofragment_id);
+              query_result.second.push_back(pseudofragment_weight);
+            };
+          };
+        };
+      };
+      ++chunk_it;
+      #pragma omp critical
+      {
+        ++progress;
+      };
+    };
+    chunk_it.Finalize();
+  };
+  // Since the threads may write to the query results asynchronously, sort the
+  // query results.
+  std::cout << "Sorting query results..." << std::endl;
+  for (auto& [connection, qrbn] : acyclic) {
+    QUERY_RESULT& query_result = qrbn[1];
+    SortQueryResult(query_result);
+  };
+  for (auto& [connection, qrbn] : ring) {
+    QUERY_RESULT& query_result = qrbn[1];
+    SortQueryResult(query_result);
+  };
+  for (auto& [connection, qrbn] : ring_part) {
+    QUERY_RESULT& query_result = qrbn[1];
+    SortQueryResult(query_result);
+  };
 };
+
+// void ConnectionQueryResults::CalculateQueryResults(const PseudofragmentDB& database) {
+//   // Ensure the containers are empty.
+//   acyclic.clear();
+//   ring.clear();
+//   ring_part.clear();
+//   // Initialize a ConnectionQueryResults template.
+//   CONNECTION_QUERY_RESULTS template_query_results;
+//   for (const auto& [connection, compatible_connections] : compatibilities.GetCompatibilityTable()) {
+//     template_query_results.insert({ connection, QUERY_RESULTS_BY_NUM{{1, QUERY_RESULT{}}} });
+//   };
+//   // Initialize the member variables using the template.
+//   acyclic = template_query_results;
+//   ring = template_query_results;
+//   ring_part = template_query_results;
+//   // Initialize a progress bar.
+//   std::cout << "Calculating ConnectionQueryResults according to the provided ConnectionCompatibilities (lax compatibility definition)..." << std::endl;
+//   sqlite3_int64 n_pseudofragments = database.GetNPseudofragments();
+//   boost::progress_display progress(n_pseudofragments);
+//   // Iterate over the Pseudofragments in the database.
+//   PseudofragmentDB::PseudofragmentIterator it (database);
+//   while (!it.AtEnd()) {
+//     sqlite3_int64 pseudofragment_id = it.GetPseudofragmentID();
+//     unsigned pseudofragment_frequency = it.GetPseudofragmentFrequency();
+//     const Pseudofragment& pseudofragment = it.GetPseudofragment();
+//     unsigned pseudofragment_size = pseudofragment.GetSize();
+//     const ConnectionsTable& pseudofragment_connections = pseudofragment.GetConnections();
+//     // Iterate over the Connections in the database.
+//     for (const auto& [connection, compatible_connections] : compatibilities.GetCompatibilityTable()) {
+//       // If the Pseudofragment is compatible with the Connection record the
+//       // Pseudofragment's ID and weight in the appropiate containers.
+//       if (compatibilities.AreCompatible(pseudofragment_connections, connection)) {
+//         if (!pseudofragment.HasRing() && !pseudofragment.IsRingPart()) {
+//           QUERY_RESULT& query_result = acyclic[connection][1];
+//           float pseudofragment_weight = std::pow(pseudofragment_frequency, acyclic_frequency_gamma) * std::pow(pseudofragment_size, acyclic_size_gamma);
+//           query_result.first.push_back(pseudofragment_id);
+//           query_result.second.push_back(pseudofragment_weight);
+//         };
+//         if (pseudofragment.HasRing()) {
+//           QUERY_RESULT& query_result = ring[connection][1];
+//           float pseudofragment_weight = std::pow(pseudofragment_frequency, ring_frequency_gamma) * std::pow(pseudofragment_size, ring_size_gamma);
+//           query_result.first.push_back(pseudofragment_id);
+//           query_result.second.push_back(pseudofragment_weight);
+//         };
+//         if (pseudofragment.IsRingPart()) {
+//           QUERY_RESULT& query_result = ring_part[connection][1];
+//           float pseudofragment_weight = std::pow(pseudofragment_frequency, ring_frequency_gamma) * std::pow(pseudofragment_size, ring_size_gamma);
+//           query_result.first.push_back(pseudofragment_id);
+//           query_result.second.push_back(pseudofragment_weight);
+//         };
+//       };
+//     };
+//     ++it;
+//     ++progress;
+//   };
+//   it.Finalize();
+// };
 
 void ConnectionQueryResults::QueryResultIntersection(const QUERY_RESULT& qr1, const QUERY_RESULT& qr2, QUERY_RESULT& intersection, bool ignore_weights) {
   std::vector<unsigned>::const_iterator first_ids1 = qr1.first.begin();
@@ -326,19 +595,21 @@ void ConnectionQueryResults::AssignFreshWeights(const Connection& connection, Co
   cpoint.weights.ring_part = query_result->second;
 };
 
-void ConnectionQueryResults::AssignFreshWeights(const Connection& connection, ConnectionPoint* cpoint) {
-  // Assign the acyclic IDs and weights.
-  QUERY_RESULT* query_result = &acyclic[connection][1];
-  cpoint->ids.acyclic = query_result->first;
-  cpoint->weights.acyclic = query_result->second;
-  // Assign the cyclic IDs and weights.
-  query_result = &ring[connection][1];
-  cpoint->ids.ring = query_result->first;
-  cpoint->weights.ring = query_result->second;
-  // Assign the ring part IDs and weights.
-  query_result = &ring_part[connection][1];
-  cpoint->ids.ring_part = query_result->first;
-  cpoint->weights.ring_part = query_result->second;
+void ConnectionQueryResults::AssignFreshWeights(const Connection& connection, std::vector<ConnectionPoint>& cpoints) {
+  QUERY_RESULT* acyclic_qresult = &acyclic[connection][1];
+  QUERY_RESULT* ring_qresult = &ring[connection][1];
+  QUERY_RESULT* ring_part_qresult = &ring_part[connection][1];
+  for (ConnectionPoint& cpoint : cpoints) {
+    // Assign the acyclic IDs and weights.
+    cpoint.ids.acyclic = acyclic_qresult->first;
+    cpoint.weights.acyclic = acyclic_qresult->second;
+    // Assign the cyclic IDs and weights.
+    cpoint.ids.ring = ring_qresult->first;
+    cpoint.weights.ring = ring_qresult->second;
+    // Assign the ring part IDs and weights.
+    cpoint.ids.ring_part = ring_part_qresult->first;
+    cpoint.weights.ring_part = ring_part_qresult->second;
+  };
 };
 
 void ConnectionQueryResults::AssignFreshWeights(const Connection& connection, const std::vector<ConnectionPoint*>& cpoints) {
@@ -355,23 +626,6 @@ void ConnectionQueryResults::AssignFreshWeights(const Connection& connection, co
     // Assign the ring part IDs and weights.
     cpoint->ids.ring_part = ring_part_query_result->first;
     cpoint->weights.ring_part = ring_part_query_result->second;
-  };
-};
-
-void ConnectionQueryResults::AssignFreshWeights(const Connection& connection, std::vector<ConnectionPoint>& cpoints) {
-  QUERY_RESULT* acyclic_qresult = &acyclic[connection][1];
-  QUERY_RESULT* ring_qresult = &ring[connection][1];
-  QUERY_RESULT* ring_part_qresult = &ring_part[connection][1];
-  for (ConnectionPoint& cpoint : cpoints) {
-    // Assign the acyclic IDs and weights.
-    cpoint.ids.acyclic = acyclic_qresult->first;
-    cpoint.weights.acyclic = acyclic_qresult->second;
-    // Assign the cyclic IDs and weights.
-    cpoint.ids.ring = ring_qresult->first;
-    cpoint.weights.ring = ring_qresult->second;
-    // Assign the ring part IDs and weights.
-    cpoint.ids.ring_part = ring_part_qresult->first;
-    cpoint.weights.ring_part = ring_part_qresult->second;
   };
 };
 
@@ -407,16 +661,16 @@ float ConnectionQueryResults::GetAcyclicFrequencyGamma() const {
   return acyclic_frequency_gamma;
 };
 
-float ConnectionQueryResults::GetAcyclicLevelGamma() const {
-  return acyclic_level_gamma;
+float ConnectionQueryResults::GetAcyclicSizeGamma() const {
+  return acyclic_size_gamma;
 };
 
 float ConnectionQueryResults::GetRingFrequencyGamma() const {
   return ring_frequency_gamma;
 };
 
-float ConnectionQueryResults::GetRingLevelGamma() const {
-  return ring_level_gamma;
+float ConnectionQueryResults::GetRingSizeGamma() const {
+  return ring_size_gamma;
 };
 
 void ConnectionQueryResults::Print() const {
@@ -501,13 +755,19 @@ void ConcatenateQueryResults(QUERY_RESULT& recipient, const QUERY_RESULT& sender
   };
 };
 
+void SortQueryResult(QUERY_RESULT& query_result, bool ignore_weights) {
+  std::vector<size_t> permutation = GetSortPermutation(query_result.first);
+  ApplySortPermutation(query_result.first, permutation);
+  if (!ignore_weights) {
+    ApplySortPermutation(query_result.second, permutation);
+  };
+};
+
 void UniqueQueryResult(QUERY_RESULT& query_result, bool ignore_weights) {
   std::vector<unsigned>::iterator first_ids = query_result.first.begin(), last_ids = query_result.first.end(), result_ids = query_result.first.begin();
-
   if (first_ids == last_ids) {
     return;
   };
-
   if (ignore_weights) {
     while (first_ids != last_ids) {
       if (*result_ids != *(++first_ids)) {
@@ -529,4 +789,3 @@ void UniqueQueryResult(QUERY_RESULT& query_result, bool ignore_weights) {
     query_result.second.resize(n_elements);
   };
 };
-

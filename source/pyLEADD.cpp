@@ -7,7 +7,20 @@ PYBIND11_MAKE_OPAQUE(std::list<ReconstructedMol>)
 PYBIND11_MODULE(pyLEADD, module) {
   module.doc() = "Lamarckian Evolutionary Algorithm for de novo Drug Design";
 
-  pybind11::class_<ReconstructionSettings>(module, "LEADDSettings")
+  pybind11::class_<FragmentationSettings>(module, "FragmentationSettings")
+    .def(pybind11::init<const std::string&>(),
+         pybind11::arg("settings_file_path"))
+    .def("SetAtomTyping", &FragmentationSettings::SetAtomTyping)
+    .def("SetSystematicFragmentation", &FragmentationSettings::SetSystematicFragmentation)
+    .def("SetMinFragmentSize", &FragmentationSettings::SetMinFragmentSize)
+    .def("SetMaxFragmentSize", &FragmentationSettings::SetMaxFragmentSize)
+    .def("SetFragmentRings", &FragmentationSettings::SetFragmentRings)
+    .def("SetMorganRadius", &FragmentationSettings::SetMorganRadius)
+    .def("SetMorganConsiderChirality", &FragmentationSettings::SetMorganConsiderChirality)
+    .def("SetHashedMorganNBits", &FragmentationSettings::SetHashedMorganNBits)
+    .def("Print", &FragmentationSettings::Print);
+
+  pybind11::class_<ReconstructionSettings>(module, "ReconstructionSettings")
     .def(pybind11::init<const std::string&, bool>(),
          pybind11::arg("settings_file_path"), pybind11::arg("check_paths") = true)
     .def("SetPRNGSeed", &ReconstructionSettings::SetPRNGSeed)
@@ -40,12 +53,12 @@ PYBIND11_MODULE(pyLEADD, module) {
     }, pybind11::keep_alive<0, 1>());
 
   module.def("MakePopulationFromSMILES", &MakePopulationFromSMILES,
-             pybind11::arg("population_smiles"), pybind11::arg("fragment_rings") = false,
+             pybind11::arg("population_smiles"), pybind11::arg("fragmentation_settings"),
              pybind11::return_value_policy::move);
 
   pybind11::class_<LEADD>(module, "LEADD")
     .def(pybind11::init<ReconstructionSettings, const std::string&>(),
-         pybind11::arg("settings"), pybind11::arg("output_directory_path"))
+         pybind11::arg("reconstruction_settings"), pybind11::arg("output_directory_path"))
     .def("TerminationCriteriaMet", &LEADD::TerminationCriteriaMet)
     .def("GenerateChildren", &LEADD::GenerateChildren)
     .def("SelectivePressure", &LEADD::SelectivePressure)

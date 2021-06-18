@@ -1,21 +1,21 @@
 #include "Pseudofragment.hpp"
 
-extern const unsigned pseudofragment_version = 20200306;
+extern const unsigned pseudofragment_version = 20210615;
 
-// Definition of the integer-RDKit::BondType associative array.
+// Definition of the integer-RDKit::BondType associative arrays.
 INT_BOND_TYPE_TABLE int_bond_type_table({
-    { 0,  RDKit::Bond::UNSPECIFIED}, { 1,        RDKit::Bond::SINGLE},
-    { 2,       RDKit::Bond::DOUBLE}, { 3,        RDKit::Bond::TRIPLE},
-    { 4,    RDKit::Bond::QUADRUPLE}, { 5,     RDKit::Bond::QUINTUPLE},
-    { 6,     RDKit::Bond::HEXTUPLE}, { 7,   RDKit::Bond::ONEANDAHALF},
-    { 8,  RDKit::Bond::TWOANDAHALF}, { 9, RDKit::Bond::THREEANDAHALF},
-    {10, RDKit::Bond::FOURANDAHALF}, {11,  RDKit::Bond::FIVEANDAHALF},
-    {12,     RDKit::Bond::AROMATIC}, {13,         RDKit::Bond::IONIC},
-    {14,     RDKit::Bond::HYDROGEN}, {15,   RDKit::Bond::THREECENTER},
-    {16,    RDKit::Bond::DATIVEONE}, {17,        RDKit::Bond::DATIVE},
-    {18,      RDKit::Bond::DATIVEL}, {19,       RDKit::Bond::DATIVER},
-    {20,        RDKit::Bond::OTHER}, {21,          RDKit::Bond::ZERO}
-  });
+  { 0,  RDKit::Bond::UNSPECIFIED}, { 1,        RDKit::Bond::SINGLE},
+  { 2,       RDKit::Bond::DOUBLE}, { 3,        RDKit::Bond::TRIPLE},
+  { 4,    RDKit::Bond::QUADRUPLE}, { 5,     RDKit::Bond::QUINTUPLE},
+  { 6,     RDKit::Bond::HEXTUPLE}, { 7,   RDKit::Bond::ONEANDAHALF},
+  { 8,  RDKit::Bond::TWOANDAHALF}, { 9, RDKit::Bond::THREEANDAHALF},
+  {10, RDKit::Bond::FOURANDAHALF}, {11,  RDKit::Bond::FIVEANDAHALF},
+  {12,     RDKit::Bond::AROMATIC}, {13,         RDKit::Bond::IONIC},
+  {14,     RDKit::Bond::HYDROGEN}, {15,   RDKit::Bond::THREECENTER},
+  {16,    RDKit::Bond::DATIVEONE}, {17,        RDKit::Bond::DATIVE},
+  {18,      RDKit::Bond::DATIVEL}, {19,       RDKit::Bond::DATIVER},
+  {20,        RDKit::Bond::OTHER}, {21,          RDKit::Bond::ZERO}
+});
 
 BOND_TYPE_INT_TABLE bond_type_int_table({
   {RDKit::Bond::UNSPECIFIED,   0}, {RDKit::Bond::SINGLE,        1},
@@ -29,9 +29,23 @@ BOND_TYPE_INT_TABLE bond_type_int_table({
   {RDKit::Bond::DATIVEONE,    16}, {RDKit::Bond::DATIVE,       17},
   {RDKit::Bond::DATIVEL,      18}, {RDKit::Bond::DATIVER,      19},
   {RDKit::Bond::OTHER,        20}, {RDKit::Bond::ZERO,         21}
-  });
+});
 
-// Precalculation of uniform distributions of given sizes.
+BOND_TYPE_INT_TABLE bond_type_order_table ({
+  {RDKit::Bond::UNSPECIFIED,   1}, {RDKit::Bond::SINGLE,        1},
+  {RDKit::Bond::DOUBLE,        2}, {RDKit::Bond::TRIPLE,        3},
+  {RDKit::Bond::QUADRUPLE,     4}, {RDKit::Bond::QUINTUPLE,     5},
+  {RDKit::Bond::HEXTUPLE,      6}, {RDKit::Bond::ONEANDAHALF,   1},
+  {RDKit::Bond::TWOANDAHALF,   2}, {RDKit::Bond::THREEANDAHALF, 3},
+  {RDKit::Bond::FOURANDAHALF,  4}, {RDKit::Bond::FIVEANDAHALF,  5},
+  {RDKit::Bond::AROMATIC,      1}, {RDKit::Bond::IONIC,         1},
+  {RDKit::Bond::HYDROGEN,      1}, {RDKit::Bond::THREECENTER,   1},
+  {RDKit::Bond::DATIVEONE,     1}, {RDKit::Bond::DATIVE,        1},
+  {RDKit::Bond::DATIVEL,       1}, {RDKit::Bond::DATIVER,       1},
+  {RDKit::Bond::OTHER,         1}, {RDKit::Bond::ZERO,          0}
+});
+
+// Pre-construction of uniform distributions of given sizes.
 INT_DISTRIBUTION_MAP uniform_int_distributions{
   {2,  std::uniform_int_distribution<unsigned>(0, 1)},
   {3,  std::uniform_int_distribution<unsigned>(0, 2)},
@@ -51,9 +65,8 @@ INT_DISTRIBUTION_MAP uniform_int_distributions{
 
 extern const unsigned max_size_uniform_int_distributions = 15;
 
-// Class PseudofragmentIDs
-PseudofragmentIDs::PseudofragmentIDs() = default;
 
+// Class PseudofragmentIDs
 const std::vector<unsigned>& PseudofragmentIDs::GetAcyclicIDs() const {
   return acyclic;
 };
@@ -97,8 +110,6 @@ void PseudofragmentIDs::Clear() {
 
 
 // Class PseudofragmentWeights
-PseudofragmentWeights::PseudofragmentWeights() = default;
-
 const std::vector<float>& PseudofragmentWeights::GetAcyclicWeights() const {
   return acyclic;
 };
@@ -198,23 +209,26 @@ void ConnectionPoint::ClearWeights() {
 
 
 // Class ConnectionsTable
-ConnectionsTable::ConnectionsTable() = default;
-
 CONNECTIONS_MAP::iterator ConnectionsTable::begin() {
   return cmap.begin();
 };
+
 CONNECTIONS_MAP::const_iterator ConnectionsTable::begin() const {
   return cmap.begin();
 };
+
 CONNECTIONS_MAP::iterator ConnectionsTable::end() {
   return cmap.end();
 };
+
 CONNECTIONS_MAP::const_iterator ConnectionsTable::end() const {
   return cmap.end();
 };
+
 CONNECTIONS_MAP::iterator ConnectionsTable::find(const Connection& connection) {
   return cmap.find(connection);
 };
+
 CONNECTIONS_MAP::const_iterator ConnectionsTable::find(const Connection& connection) const {
   return cmap.find(connection);
 };
@@ -235,24 +249,8 @@ ConnectionPoint* ConnectionsTable::AddConnection(const Connection& connection, c
     ++n_connection_points;
     return &cpoints.back();
   } else {
-    std::pair<CONNECTIONS_MAP::iterator, bool> it_b_p = cmap.insert(std::make_pair(connection, CONNECTION_POINT_VECTOR{ cpoint }));
-    CONNECTION_POINT_VECTOR& cpoints = it_b_p.first->second;
-    ++n_connections;
-    ++n_connection_points;
-    return &cpoints.back();
-  };
-};
-
-ConnectionPoint* ConnectionsTable::AddConnection(const Connection& connection, const ConnectionPoint* cpoint) {
-  CONNECTIONS_MAP::iterator it = cmap.find(connection);
-  if (it != cmap.end()) {
+    auto[it, inserted] = cmap.insert({connection, {cpoint}});
     CONNECTION_POINT_VECTOR& cpoints = it->second;
-    cpoints.push_back(*cpoint);
-    ++n_connection_points;
-    return &cpoints.back();
-  } else {
-    std::pair<CONNECTIONS_MAP::iterator, bool> it_b_p = cmap.insert(std::make_pair(connection, CONNECTION_POINT_VECTOR{ *cpoint }));
-    CONNECTION_POINT_VECTOR& cpoints = it_b_p.first->second;
     ++n_connections;
     ++n_connection_points;
     return &cpoints.back();
@@ -260,15 +258,16 @@ ConnectionPoint* ConnectionsTable::AddConnection(const Connection& connection, c
 };
 
 ConnectionPoint* ConnectionsTable::AddConnection(const Connection& connection, const unsigned atom_idx) {
+  ConnectionPoint cpoint (atom_idx);
   CONNECTIONS_MAP::iterator it = cmap.find(connection);
   if (it != cmap.end()) {
     CONNECTION_POINT_VECTOR& cpoints = it->second;
-    cpoints.push_back(ConnectionPoint(atom_idx));
+    cpoints.push_back(cpoint);
     ++n_connection_points;
     return &cpoints.back();
   } else {
-    std::pair<CONNECTIONS_MAP::iterator, bool> it_b_p = cmap.insert(std::make_pair(connection, CONNECTION_POINT_VECTOR{ ConnectionPoint(atom_idx) }));
-    CONNECTION_POINT_VECTOR& cpoints = it_b_p.first->second;
+    auto[it, inserted] = cmap.insert({connection, {cpoint}});
+    CONNECTION_POINT_VECTOR& cpoints = it->second;
     ++n_connections;
     ++n_connection_points;
     return &cpoints.back();
@@ -355,47 +354,14 @@ std::vector<ConnectionPoint*> ConnectionsTable::AddConnections(const Connection&
 bool ConnectionsTable::RemoveConnection(const Connection& connection, const ConnectionPoint& cpoint) {
   CONNECTIONS_MAP::iterator cmap_it = cmap.find(connection);
   if (cmap_it == cmap.end()) {
-    throw std::runtime_error(std::string("Target Connection for deletion wasn't found."));
+    throw std::runtime_error("Target Connection for deletion wasn't found.");
     return false;
   } else {
     CONNECTION_POINT_VECTOR& cpoints = cmap_it->second;
     CONNECTION_POINT_VECTOR::iterator vec_it, vec_end_it = cpoints.end();
     vec_it = std::find(cpoints.begin(), vec_end_it, cpoint);
     if (vec_it == vec_end_it) {
-      throw std::runtime_error(std::string("Target ConnectionPoint for deletion wasn't found."));
-      return false;
-    } else {
-      if (cpoints.size() > 1) {
-        if (vec_it == vec_end_it - 1) {
-          cpoints.pop_back();
-        } else {
-          *vec_it = std::move(cpoints.back());
-          cpoints.pop_back();
-        };
-      } else {
-        cmap.erase(cmap_it);
-        --n_connections;
-      };
-      --n_connection_points;
-      return true;
-    };
-  };
-};
-
-bool ConnectionsTable::RemoveConnection(const Connection& connection, const ConnectionPoint* cpoint) {
-  CONNECTIONS_MAP::iterator cmap_it = cmap.find(connection);
-  if (cmap_it == cmap.end()) {
-    throw std::runtime_error(std::string("Target Connection for deletion wasn't found."));
-    return false;
-  } else {
-    CONNECTION_POINT_VECTOR& cpoints = cmap_it->second;
-    CONNECTION_POINT_VECTOR::iterator vec_it, vec_end_it = cpoints.end();
-    vec_it = std::find_if(cpoints.begin(), vec_end_it,
-      [=](const ConnectionPoint& cp) {
-        return cp.atom_idx == cpoint->atom_idx;
-      });
-    if (vec_it == vec_end_it) {
-      throw std::runtime_error(std::string("Target ConnectionPoint for deletion wasn't found."));
+      throw std::runtime_error("Target ConnectionPoint for deletion wasn't found.");
       return false;
     } else {
       if (cpoints.size() > 1) {
@@ -418,7 +384,7 @@ bool ConnectionsTable::RemoveConnection(const Connection& connection, const Conn
 bool ConnectionsTable::RemoveConnection(const Connection& connection, const unsigned atom_idx) {
   CONNECTIONS_MAP::iterator cmap_it = cmap.find(connection);
   if (cmap_it == cmap.end()) {
-    throw std::runtime_error(std::string("Target Connection for deletion wasn't found."));
+    throw std::runtime_error("Target Connection for deletion wasn't found.");
     return false;
   } else {
     CONNECTION_POINT_VECTOR& cpoints = cmap_it->second;
@@ -428,7 +394,7 @@ bool ConnectionsTable::RemoveConnection(const Connection& connection, const unsi
         return cpoint.atom_idx == atom_idx;
       });
     if (vec_it == vec_end_it) {
-      throw std::runtime_error(std::string("Target ConnectionPoint for deletion wasn't found."));
+      throw std::runtime_error("Target ConnectionPoint for deletion wasn't found.");
       return false;
     } else {
       if (cpoints.size() > 1) {
@@ -451,7 +417,7 @@ bool ConnectionsTable::RemoveConnection(const Connection& connection, const unsi
 bool ConnectionsTable::RemoveConnection(const Connection& connection) {
   CONNECTIONS_MAP::iterator cmap_it = cmap.find(connection);
   if (cmap_it == cmap.end()) {
-    throw std::runtime_error(std::string("Target Connection for deletion wasn't found."));
+    throw std::runtime_error("Target Connection for deletion wasn't found.");
     return false;
   } else {
     unsigned n_connections_vec = cmap_it->second.size();
@@ -465,7 +431,7 @@ bool ConnectionsTable::RemoveConnection(const Connection& connection) {
 bool ConnectionsTable::RemoveConnections(const Connection& connection, const CONNECTION_POINT_VECTOR& cpoints) {
   CONNECTIONS_MAP::iterator cmap_it = cmap.find(connection);
   if (cmap_it == cmap.end()) {
-    throw std::runtime_error(std::string("Target Connection for deletion wasn't found."));
+    throw std::runtime_error("Target Connection for deletion wasn't found.");
     return false;
   } else {
     CONNECTION_POINT_VECTOR& cpoint_vec = cmap_it->second;
@@ -474,43 +440,7 @@ bool ConnectionsTable::RemoveConnections(const Connection& connection, const CON
       vec_end_it = cpoint_vec.end();
       vec_it = std::find(vec_begin_it, vec_end_it, cpoint);
       if (vec_it == vec_end_it) {
-        throw std::runtime_error(std::string("Target ConnectionPoint for deletion wasn't found."));
-        return false;
-      } else {
-        if (cpoint_vec.size() > 1) {
-          if (vec_it == vec_end_it - 1) {
-            cpoint_vec.pop_back();
-          } else {
-            *vec_it = std::move(cpoint_vec.back());
-            cpoint_vec.pop_back();
-          };
-        } else {
-          cmap.erase(cmap_it);
-          --n_connections;
-        };
-        --n_connection_points;
-      };
-    };
-    return true;
-  };
-};
-
-bool ConnectionsTable::RemoveConnections(const Connection& connection, const CONNECTION_POINT_PTR_VECTOR& cpoints) {
-  CONNECTIONS_MAP::iterator cmap_it = cmap.find(connection);
-  if (cmap_it == cmap.end()) {
-    throw std::runtime_error(std::string("Target Connection for deletion wasn't found."));
-    return false;
-  } else {
-    CONNECTION_POINT_VECTOR& cpoint_vec = cmap_it->second;
-    CONNECTION_POINT_VECTOR::iterator vec_it, vec_end_it, vec_begin_it = cpoint_vec.begin();
-    for (const ConnectionPoint* cpoint : cpoints) {
-      vec_end_it = cpoint_vec.end();
-      vec_it = std::find_if(vec_begin_it, vec_end_it,
-        [=](const ConnectionPoint& cp) {
-          return cp.atom_idx == cpoint->atom_idx;
-        });
-      if (vec_it == vec_end_it) {
-        throw std::runtime_error(std::string("Target ConnectionPoint for deletion wasn't found."));
+        throw std::runtime_error("Target ConnectionPoint for deletion wasn't found.");
         return false;
       } else {
         if (cpoint_vec.size() > 1) {
@@ -534,7 +464,7 @@ bool ConnectionsTable::RemoveConnections(const Connection& connection, const CON
 bool ConnectionsTable::RemoveConnections(const Connection& connection, const std::vector<unsigned>& atom_indices) {
   CONNECTIONS_MAP::iterator cmap_it = cmap.find(connection);
   if (cmap_it == cmap.end()) {
-    throw std::runtime_error(std::string("Target Connection for deletion wasn't found."));
+    throw std::runtime_error("Target Connection for deletion wasn't found.");
     return false;
   } else {
     CONNECTION_POINT_VECTOR& cpoint_vec = cmap_it->second;
@@ -546,7 +476,7 @@ bool ConnectionsTable::RemoveConnections(const Connection& connection, const std
           return cpoint.atom_idx == atom_idx;
         });
       if (vec_it == vec_end_it) {
-        throw std::runtime_error(std::string("Target ConnectionPoint for deletion wasn't found."));
+        throw std::runtime_error("Target ConnectionPoint for deletion wasn't found.");
         return false;
       } else {
         if (cpoint_vec.size() > 1) {
@@ -572,7 +502,7 @@ ConnectionPoint* ConnectionsTable::MoveConnectionTo(const Connection& connection
   CONNECTIONS_MAP::iterator sender_it = cmap.find(connection), recipient_it = recipient.cmap.find(connection);
   // If the Connection isn't present in the source table signal function failure.
   if (sender_it == cmap.end()) {
-    throw std::runtime_error(std::string("Target Connection to move wasn't found."));
+    throw std::runtime_error("Target Connection to move wasn't found.");
   };
   // Search for the ConnectionPoint in the source ConnectionTable's Connection entry.
   CONNECTION_POINT_VECTOR& sender_cpoint_vec = sender_it->second;
@@ -583,7 +513,7 @@ ConnectionPoint* ConnectionsTable::MoveConnectionTo(const Connection& connection
     });
   // If the ConnectionPoint isn't present in the Connection entry signal function failure.
   if (vec_it == vec_end_it) {
-    throw std::runtime_error(std::string("Target ConnectionPoint to move wasn't found."));
+    throw std::runtime_error("Target ConnectionPoint to move wasn't found.");
   };
   // Add the Connection to the recipient ConnectionTable.
   ConnectionPoint* inserted_cpoint;
@@ -621,23 +551,27 @@ bool ConnectionsTable::HasConnection(const Connection& connection) const {
 };
 
 bool ConnectionsTable::HasConnection(const Connection& connection, const unsigned atom_idx) const {
-  for (const auto& c : cmap) {
-    if (c.first == connection) {
-      for (const ConnectionPoint& cpoint : c.second) {
-        if (cpoint.atom_idx == atom_idx) {
-          return true;
-        };
-      };
+  CONNECTIONS_MAP::const_iterator cmap_it = cmap.find(connection);
+  if (cmap_it == cmap.end()) {
+    return false;
+  };
+  const CONNECTION_POINT_VECTOR& cpoints = cmap_it->second;
+  for (const ConnectionPoint& cpoint : cpoints) {
+    if (cpoint.atom_idx == atom_idx) {
+      return true;
     };
   };
   return false;
 };
 
 ConnectionPoint* ConnectionsTable::GetConnectionPointWithIdx(const Connection& connection, unsigned atom_idx, std::mt19937& prng) {
-  std::vector<ConnectionPoint*> matches;
+  // Retrieve all matching ConnectionPoints.
   CONNECTIONS_MAP::iterator cmap_it = cmap.find(connection);
-  assert(cmap_it != cmap.end());
+  if (cmap_it == cmap.end()) {
+    throw std::runtime_error("Connection couldn't be found.");
+  };
   CONNECTION_POINT_VECTOR& cpoints = cmap_it->second;
+  std::vector<ConnectionPoint*> matches;
   for (ConnectionPoint& cpoint : cpoints) {
     if (cpoint.atom_idx == atom_idx) {
       matches.push_back(&cpoint);
@@ -645,8 +579,12 @@ ConnectionPoint* ConnectionsTable::GetConnectionPointWithIdx(const Connection& c
   };
   // Select a random matching ConnectionPoint.
   unsigned n_cpoints = matches.size();
-  assert(n_cpoints > 0);
+  if (n_cpoints == 0) {
+    throw std::runtime_error("ConnectionPoint couldn't be found.");
+  };
   if (n_cpoints > 1) {
+    // It isn't necessary to check that the distribution exists since we will
+    // never have more than 15 ConnectionPoints on the same atom.
     return matches[uniform_int_distributions[matches.size()](prng)];
   } else {
     return matches[0];
@@ -675,10 +613,8 @@ std::vector<ConnectionPoint*> ConnectionsTable::GetConnectionPointsWithIndices(c
     return matches;
   };
   CONNECTION_POINT_VECTOR& cpoints = cmap_it->second;
-
-  std::vector<unsigned>::iterator it = std::unique(atom_indices.begin(), atom_indices.end());
-  atom_indices.resize(std::distance(atom_indices.begin(), it));
-
+  std::sort(atom_indices.begin(), atom_indices.end());
+  atom_indices.erase(std::unique(atom_indices.begin(), atom_indices.end()), atom_indices.end());
   for (unsigned atom_idx : atom_indices) {
     for (ConnectionPoint& cpoint : cpoints) {
       if (cpoint.atom_idx == atom_idx) {
@@ -696,15 +632,13 @@ std::vector<ConnectionPoint*> ConnectionsTable::GetConnectionPoints(const Connec
     return matches;
   };
   CONNECTION_POINT_VECTOR& map_cpoints = cmap_it->second;
-
   std::vector<unsigned> atom_indices;
   atom_indices.reserve(cpoints.size());
   for (const ConnectionPoint& cpoint : cpoints) {
     atom_indices.push_back(cpoint.atom_idx);
   };
-  std::vector<unsigned>::iterator it = std::unique(atom_indices.begin(), atom_indices.end());
-  atom_indices.resize(std::distance(atom_indices.begin(), it));
-
+  std::sort(atom_indices.begin(), atom_indices.end());
+  atom_indices.erase(std::unique(atom_indices.begin(), atom_indices.end()), atom_indices.end());
   for (unsigned atom_idx : atom_indices) {
     for (ConnectionPoint& map_cpoint : map_cpoints) {
       if (map_cpoint.atom_idx == atom_idx) {
@@ -715,45 +649,34 @@ std::vector<ConnectionPoint*> ConnectionsTable::GetConnectionPoints(const Connec
   return matches;
 };
 
-Connection ConnectionsTable::GetRandomCompatibleConnection(const Connection& connection, ConnectionCompatibilities& compatibilities, std::mt19937& prng) const {
-  CONNECTIONS_VECTOR compatible_vector;
-  compatible_vector.reserve(n_connections);
-  const CONNECTIONS_SET& compatible_set = compatibilities[connection];
-  CONNECTIONS_SET::const_iterator it, end_it = compatible_set.end();
-  for (const auto& c : cmap) {
-    it = compatible_set.find(c.first);
-    if (it != end_it) {
-      compatible_vector.push_back(c.first);
+// Function that returns a re-numbered copy of the ConnectionsTable.
+ConnectionsTable ConnectionsTable::RenumberAtoms(const std::vector<unsigned>& atom_order) const {
+  ConnectionsTable renumbered_table = *this;
+  for (auto& [connection, cpoints] : renumbered_table) {
+    for (ConnectionPoint& cpoint : cpoints) {
+      unsigned old_atom_idx = cpoint.atom_idx;
+      unsigned new_atom_idx = atom_order.at(old_atom_idx);
+      cpoint.atom_idx = new_atom_idx;
     };
   };
-  // Since the ConnectionsTable is a std::unordered_map its iteration order isn't
-  // well defined. We sort the vector to ensure we get the same results with the
-  // same PRNG seed.
-  std::sort(compatible_vector.begin(), compatible_vector.end());
-  unsigned idx = 0;
-  unsigned n_compatible_connections = compatible_vector.size();
-  assert(n_compatible_connections > 0);
-  if (n_compatible_connections > 1) {
-    if (n_compatible_connections <= max_size_uniform_int_distributions) {
-      idx = uniform_int_distributions[n_compatible_connections](prng);
-    } else {
-      std::uniform_int_distribution<unsigned> distribution(0, n_compatible_connections - 1);
-      idx = distribution(prng);
-    };
-  };
-  return compatible_vector[idx];
+  return renumbered_table;
 };
 
-bool ConnectionsTable::IsCompatibleWith(const Connection& connection, ConnectionCompatibilities& compatibilities) const {
-  const CONNECTIONS_SET& compatible_set = compatibilities[connection];
-  CONNECTIONS_SET::const_iterator it, end_it = compatible_set.end();
-  for (const auto& c : cmap) {
-    it = compatible_set.find(c.first);
-    if (it != end_it) {
-      return true;
+INVERTED_CONNECTIONS_MAP ConnectionsTable::GetInvertedTable() const {
+  std::map<unsigned, std::multiset<Connection>> inverted_table;
+  std::map<unsigned, std::multiset<Connection>>::iterator it;
+  for (const auto& [connection, cpoints] : cmap) {
+    for (const ConnectionPoint& cpoint : cpoints) {
+      unsigned atom_idx = cpoint.GetAtomIdx();
+      it = inverted_table.find(atom_idx);
+      if (it == inverted_table.end()) {
+        inverted_table.insert({atom_idx, {connection}});
+      } else {
+        it->second.insert(connection);
+      };
     };
   };
-  return false;
+  return inverted_table;
 };
 
 unsigned ConnectionsTable::Size() const {
@@ -763,22 +686,13 @@ unsigned ConnectionsTable::Size() const {
 bool ConnectionsTable::Empty() const {
   if (n_connections == 0) {
     return true;
-  }
-  else {
-    return false;
   };
+  return false;
 };
 
 void ConnectionsTable::Print() const {
-  boost::format formatter("(%d, %d, %d)");
   for (const auto& c : cmap) {
-    if (c.first.GetString().empty()) {
-      Connection connection = c.first;
-      connection.GenerateString(formatter);
-      std::cout << connection.GetString() << ": ";
-    } else {
-      std::cout << c.first.GetString() << ": ";
-    };
+    std::cout << c.first.GetString() << ": ";
     for (const ConnectionPoint& cpoint : c.second) {
       std::cout << cpoint.atom_idx << " ";
     };
@@ -796,62 +710,121 @@ void ConnectionsTable::ClearWeights() {
 };
 
 
+void AssignImmutableAtomIndices(RDKit::RWMol& molecule) {
+  unsigned immutable_idx = 0;
+  for (RDKit::Atom* atom : molecule.atoms()) {
+    atom->setProp<unsigned>("ImmutableIdx", immutable_idx);
+    ++immutable_idx;
+  };
+};
+
+unsigned GetImmutableAtomIdx(const RDKit::Atom* atom) {
+  return atom->getProp<unsigned>("ImmutableIdx");
+};
+
+RDKit::Atom* GetAtomWithImmutableIdx(RDKit::RWMol& molecule, unsigned immutable_atom_idx) {
+  for (RDKit::Atom* atom : molecule.atoms()) {
+    if (atom->getProp<unsigned>("ImmutableIdx") == immutable_atom_idx) {
+      return atom;
+    };
+  };
+  throw std::runtime_error("Atom with specified ImmutableIdx couldn't be found.");
+};
+
+
+RDKit::RWMol SanitizePseudomol(const RDKit::RWMol& pseudomol, const ConnectionsTable& connections_table, bool use_immutable_indices) {
+  try {
+    // Create a copy of the unsanitized pseudomol.
+    RDKit::RWMol sanitized_mol = pseudomol;
+    // Replace the ConnectionPoints with explicit hydrogens.
+    for (const auto& [connection, cpoints] : connections_table) {
+      RDKit::Bond::BondType bond_type = int_bond_type_table[connection.GetBondType()];
+      unsigned bond_order = bond_type_order_table[bond_type];
+      for (const ConnectionPoint& cpoint : cpoints) {
+        RDKit::Atom* atom = nullptr;
+        if (use_immutable_indices) {
+          atom = GetAtomWithImmutableIdx(sanitized_mol, cpoint.GetAtomIdx());
+        } else {
+          atom = sanitized_mol.getAtomWithIdx(cpoint.GetAtomIdx());
+        };
+        atom->setNumExplicitHs(atom->getNumExplicitHs() + bond_order);
+      };
+    };
+    // Loop over the molecule in search of elements that aren't guaranteed to
+    // form a legal chemotype after hydrogen saturation. Note that if working
+    // with other elements for which simple hydrogen saturation  isn't guaranteed
+    // to yield sensible chemotypes this section ought to be expanded.
+    for (RDKit::Atom* atom : sanitized_mol.atoms()) {
+      // If the atom is a phosphorus:
+      if (atom->getAtomicNum() == 15) {
+        unsigned valence = atom->getTotalValence();
+        // We only treat cases where the valence is conventional.
+        if (valence == 3 || valence == 5) {
+          // Calculate the "heavy atom valence" as the number of bonds involved in
+          // bonding to heavy atoms.
+          unsigned n_hydrogens = atom->getTotalNumHs();
+          unsigned heavy_atom_valence = valence - n_hydrogens;
+          // We set the number of explicit hydrogens to the number required to
+          // reach the lowest valid valence.
+          unsigned n_explicit_hydrogens_to_sanitize = 0;
+          if (heavy_atom_valence <= 5) {
+            n_explicit_hydrogens_to_sanitize = 5 - heavy_atom_valence;
+          };
+          if (heavy_atom_valence <= 3) {
+            n_explicit_hydrogens_to_sanitize = 3 - heavy_atom_valence;
+          };
+          atom->setNumExplicitHs(n_explicit_hydrogens_to_sanitize);
+        };
+      // If the atom is a sulfur:
+      } else if (atom->getAtomicNum() == 16) {
+        unsigned valence = atom->getTotalValence();
+        if (valence == 2 || valence == 4 || valence == 6) {
+          unsigned n_hydrogens = atom->getTotalNumHs();
+          unsigned heavy_atom_valence = valence - n_hydrogens;
+          unsigned n_explicit_hydrogens_to_sanitize = 0;
+          if (heavy_atom_valence <= 6) {
+            n_explicit_hydrogens_to_sanitize = 6 - heavy_atom_valence;
+          };
+          if (heavy_atom_valence <= 4) {
+            n_explicit_hydrogens_to_sanitize = 4 - heavy_atom_valence;
+          };
+          if (heavy_atom_valence <= 2) {
+            n_explicit_hydrogens_to_sanitize = 2 - heavy_atom_valence;
+          };
+          atom->setNumExplicitHs(n_explicit_hydrogens_to_sanitize);
+        };
+      };
+    };
+    // Remove the hydrogens and implicitly wrap up molecule sanitization.
+    // This is important since explicit hydrogens affect the fingerprint.
+    RDKit::MolOps::removeHs(sanitized_mol);
+    return sanitized_mol;
+  } catch (const std::exception& e) {
+    std::cout << "ERROR: Sanitization failed molecule: " << RDKit::MolToSmiles(pseudomol) << std::endl;
+    throw;
+  };
+};
+
+
 // Class Pseudofragment
 Pseudofragment::Pseudofragment() = default;
-Pseudofragment::Pseudofragment(const RDKit::ROMol& pmol, const ConnectionsTable& cs,
-  const std::string& sml, bool hr, bool rp) :
-  pseudomol(pmol),
-  connections(cs),
-  smiles(sml),
-  has_ring(hr),
-  ring_part(rp),
-  level(pmol.getNumHeavyAtoms()) {};
+// Pseudofragment::Pseudofragment(const RDKit::ROMol& pmol, const ConnectionsTable& cs,
+//   const std::string& sml, bool hr, bool rp) :
+//   pseudomol(pmol),
+//   connections(cs),
+//   smiles(sml),
+//   has_ring(hr),
+//   ring_part(rp) {};
 Pseudofragment::Pseudofragment(const RDKit::RWMol& pmol, const ConnectionsTable& cs,
   const std::string& sml, bool hr, bool rp) :
   pseudomol(pmol),
   connections(cs),
   smiles(sml),
   has_ring(hr),
-  ring_part(rp),
-  level(pmol.getNumHeavyAtoms()) {};
+  ring_part(rp) {};
 
 bool Pseudofragment::operator== (const Pseudofragment & other) const {
   return (smiles == other.smiles) && (ring_part == other.ring_part);
-};
-
-RDKit::RWMol Pseudofragment::SanitizeCopy() const {
-  // Make a copy of the Pseudofragment's pseudomol.
-  RDKit::RWMol pseudomol_copy = pseudomol;
-  // Add explicit hydrogens to replace the pseudomol's pseudoatoms.
-  // (i.e. saturate the ReconstructedMol's Connections with hydrogens).
-  RDKit::Atom hydrogen(1);
-  std::vector<unsigned> hydrogen_indices;
-  for (const auto& c : connections) {
-    const Connection& connection = c.first;
-    const std::vector<ConnectionPoint>& cpoints = c.second;
-    unsigned bond_order = connection.bond_type;
-    assert(bond_order == 1 || bond_order == 2 || bond_order == 3);
-    for (const ConnectionPoint& cpoint : cpoints) {
-      for (unsigned hydrogen_n = 1; hydrogen_n <= bond_order; ++hydrogen_n) {
-        unsigned hydrogen_idx = pseudomol_copy.addAtom(&hydrogen);
-        hydrogen_indices.push_back(hydrogen_idx);
-      };
-      unsigned atom_idx = cpoint.atom_idx;
-      for (unsigned hydrogen_idx : hydrogen_indices) {
-        pseudomol_copy.addBond(atom_idx, hydrogen_idx, RDKit::Bond::SINGLE);
-      };
-      hydrogen_indices.clear();
-    };
-  };
-  // Wrap up the molecule sanitization. Removing the hydrogens
-  // is important since they have an influence on the fingerprints.
-  RDKit::MolOps::sanitizeMol(pseudomol_copy);
-  RDKit::MolOps::removeHs(pseudomol_copy);
-  return pseudomol_copy;
-};
-
-const RDKit::SparseIntVect<std::uint32_t>* Pseudofragment::GetFingerprint() const {
-  return RDKit::MorganFingerprints::getFingerprint(SanitizeCopy(), 2);
 };
 
 const RDKit::ROMol& Pseudofragment::GetPseudomol() const {
@@ -862,8 +835,22 @@ const ConnectionsTable& Pseudofragment::GetConnections() const {
   return connections;
 };
 
-const std::string& Pseudofragment::GetSMILES() const {
+const std::string& Pseudofragment::GetConnectionEncodingSMILES() const {
   return smiles;
+};
+
+std::string Pseudofragment::GetSanitizedSMILES() const {
+  RDKit::RWMol sanitized_fragment = SanitizePseudomol(pseudomol, connections, false);
+  return RDKit::MolToSmiles(sanitized_fragment);
+};
+
+RDKit::SparseIntVect<std::uint32_t>* Pseudofragment::GetFingerprint() const {
+  RDKit::RWMol sanitized_fragment = SanitizePseudomol(pseudomol, connections, false);
+  return RDKit::MorganFingerprints::getFingerprint(sanitized_fragment, 2);
+};
+
+unsigned Pseudofragment::GetSize() const {
+  return pseudomol.getNumAtoms();
 };
 
 bool Pseudofragment::HasRing() const {
@@ -872,8 +859,4 @@ bool Pseudofragment::HasRing() const {
 
 bool Pseudofragment::IsRingPart() const {
   return ring_part;
-};
-
-unsigned Pseudofragment::GetLevel() const {
-  return level;
 };

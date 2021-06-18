@@ -39,11 +39,11 @@ def Main():
     scorer = ECFPSimilarityScorer(reference, 2)
 
     # Read the LEADD settings from the user-specified file.
-    settings = pyLEADD.LEADDSettings(settings_file_path=args.settings)
+    settings = pyLEADD.ReconstructionSettings(settings_file_path=args.settings)
     settings.Print()
 
     # Initialize a LEADD designer object. This also initializes the starting population.
-    leadd = pyLEADD.LEADD(settings=settings, output_directory_path=args.output)
+    leadd = pyLEADD.LEADD(reconstruction_settings=settings, output_directory_path=args.output)
 
     # Assign preliminary scores to the population members.
     # NOTE: to be as generic as possible, LEADD uses SMILES to communicate with

@@ -3,9 +3,9 @@ cmake_minimum_required(VERSION 3.15)
 # Define the project.
 project(LEADD
   LANGUAGES CXX
-  VERSION 1.0.0
+  VERSION 2.0.0
   DESCRIPTION "Lamarckian Evolutionary Algorithm for de novo Drug Design"
-  HOMEPAGE_URL "https://github.com/AlanKerstjens/LEADD"
+  HOMEPAGE_URL "https://github.com/UAMCAntwerpen/LEADD"
 )
 
 # Create an option to allow the user to specify whether they want to build
@@ -13,7 +13,7 @@ project(LEADD
 option(BUILD_PYTHON_BINDINGS "Build LEADD Python bindings using pybind11" ON)
 
 # Specify the C++ standard.
-set(CMAKE_CXX_STANDARD 17) # We need C++17 to have access to std::filesystem
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 # Define the directories where the source code can be found and where the
@@ -56,6 +56,8 @@ link_directories(
   ${Boost_LIBRARY_DIRS}
 )
 
+message("-- Extra compilation flags: ${CMAKE_CXX_FLAGS}")
+
 # Define all libraries included within the LEADD distribution and their dependencies.
 add_library(Graph SHARED ${LEADD_SOURCE_DIR}/Graph.cpp)
 
@@ -76,30 +78,37 @@ target_link_libraries(Pseudofragment PUBLIC
 add_library(PseudofragmentDB SHARED ${LEADD_SOURCE_DIR}/PseudofragmentDB.cpp)
 target_link_libraries(PseudofragmentDB PUBLIC
   Pseudofragment
+  OpenMP::OpenMP_CXX
   ${SQLite3_LIBRARIES}
 )
+
+add_library(FragmentationSettings SHARED ${LEADD_SOURCE_DIR}/FragmentationSettings.cpp)
 
 add_library(Fragmentation SHARED ${LEADD_SOURCE_DIR}/Fragmentation.cpp)
 target_link_libraries(Fragmentation PUBLIC
   Pseudofragment
+  FragmentationSettings
   RDKitChemTransforms
   RDKitForceFieldHelpers
 )
 
-add_library(ConnectionQueryResults SHARED ${LEADD_SOURCE_DIR}/ConnectionQueryResults.cpp)
-target_link_libraries(ConnectionQueryResults PUBLIC
-  Pseudofragment
-  ${SQLite3_LIBRARIES}
+add_library(ReconstructionSettings SHARED ${LEADD_SOURCE_DIR}/ReconstructionSettings.cpp)
+
+add_library(ConnectionCompatibilities SHARED ${LEADD_SOURCE_DIR}/ConnectionCompatibilities.cpp)
+target_link_libraries(ConnectionCompatibilities PUBLIC
+  PseudofragmentDB
 )
 
-add_library(ReconstructionSettings SHARED ${LEADD_SOURCE_DIR}/ReconstructionSettings.cpp)
+add_library(ConnectionQueryResults SHARED ${LEADD_SOURCE_DIR}/ConnectionQueryResults.cpp)
+target_link_libraries(ConnectionQueryResults PUBLIC
+  ConnectionCompatibilities
+)
 
 add_library(Reconstruction SHARED ${LEADD_SOURCE_DIR}/Reconstruction.cpp)
 target_link_libraries(Reconstruction PUBLIC
   Graph
-  PseudofragmentDB
-  ConnectionQueryResults
   ReconstructionSettings
+  ConnectionQueryResults
   Fragmentation
   RDKitMolDraw2D
   RDKitDepictor
@@ -128,19 +137,15 @@ add_executable(EncodeConnection ${LEADD_SOURCE_DIR}/EncodeConnection.cpp)
 add_executable(Fragment ${LEADD_SOURCE_DIR}/Fragment.cpp)
 target_link_libraries(Fragment
   PseudofragmentDB
+  Fragmentation
   RDKitFileParsers
-  RDKitForceFieldHelpers
-  RDKitSubgraphs
-  RDKitChemTransforms
   boost_program_options
-  OpenMP::OpenMP_CXX
 )
 
 add_executable(MakeFragmentSimilarityMatrix ${LEADD_SOURCE_DIR}/MakeFragmentSimilarityMatrix.cpp)
 target_link_libraries(MakeFragmentSimilarityMatrix
   PseudofragmentDB
   boost_program_options
-  OpenMP::OpenMP_CXX
   ${HDF5_CXX_LIBRARIES}
 )
 
@@ -192,9 +197,11 @@ install(
     Connection
     Pseudofragment
     PseudofragmentDB
+    FragmentationSettings
     Fragmentation
-    ConnectionQueryResults
     ReconstructionSettings
+    ConnectionCompatibilities
+    ConnectionQueryResults
     Reconstruction
     SAScore
     LEADD
@@ -212,8 +219,8 @@ install(
     InspectConnectionQueryResults
     MakeFeatureLibrary
     CalculateSAScore
-    ConvertToReconstruction
     StandaloneLEADD
+    ConvertToReconstruction
   DESTINATION ${LEADD_BIN_DIR}
 )
 

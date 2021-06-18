@@ -33,7 +33,7 @@ int main(int argc, const char* argv[]) {
   // Validate that the provided input CQR file exists.
   std::filesystem::path input_path(input);
   if (!std::filesystem::exists(input_path)) {
-    throw boost::program_options::validation_error(boost::program_options::validation_error::invalid_option_value);
+    throw std::invalid_argument("Input CQR path is invalid.");
   };
 
   // Deserialize the ConnectionQueryResults file.
@@ -41,17 +41,58 @@ int main(int argc, const char* argv[]) {
   std::ifstream instream (input, std::ifstream::binary);
   boost::archive::binary_iarchive binar (instream);
   binar >> query_results;
+  instream.close();
 
   // Print the parameters to the standard output.
   std::cout << "Stringency: " << query_results.GetConnectionCompatibilities().GetStringency() << std::endl;
   std::cout << "Acyclic fragment frequency gamma: " << query_results.GetAcyclicFrequencyGamma() << std::endl;
-  std::cout << "Acyclic fragment level gamma: " << query_results.GetAcyclicLevelGamma() << std::endl;
+  std::cout << "Acyclic fragment size gamma: " << query_results.GetAcyclicSizeGamma() << std::endl;
   std::cout << "Ring fragment frequency gamma: " << query_results.GetRingFrequencyGamma() << std::endl;
-  std::cout << "Ring fragment level gamma: " << query_results.GetRingLevelGamma() << std::endl;
+  std::cout << "Ring fragment size gamma: " << query_results.GetRingSizeGamma() << std::endl;
+
+  // Calculate and print some statistics to the standard output.
+  const ConnectionCompatibilities& compatibilities = query_results.GetConnectionCompatibilities();
+  const COMPATIBILITY_TABLE& compatibility_table = compatibilities.GetCompatibilityTable();
+  size_t n_connections = compatibility_table.size();
+  double average_n_compatible_connections = 0.0;
+  for (const auto& [connection, compatible_connections] : compatibility_table) {
+    average_n_compatible_connections += compatible_connections.size();
+  };
+  average_n_compatible_connections /= n_connections;
+
+  double average_n_compatible_fragments_strict = 0.0;
+  double average_n_compatible_fragments_lax = 0.0;
+  for (const auto& [connection, qrbn] : query_results.GetStrictAcyclicResults()) {
+    for (const auto& [n, qr] : qrbn) {
+      average_n_compatible_fragments_strict += qr.first.size();
+    };
+  };
+  for (const auto& [connection, qrbn] : query_results.GetStrictRingResults()) {
+    for (const auto& [n, qr] : qrbn) {
+      average_n_compatible_fragments_strict += qr.first.size();
+    };
+  };
+  for (const auto& [connection, qrbn] : query_results.GetAcyclicResults()) {
+    for (const auto& [n, qr] : qrbn) {
+      average_n_compatible_fragments_lax += qr.first.size();
+    };
+  };
+  for (const auto& [connection, qrbn] : query_results.GetRingResults()) {
+    for (const auto& [n, qr] : qrbn) {
+      average_n_compatible_fragments_lax += qr.first.size();
+    };
+  };
+  average_n_compatible_fragments_strict /= n_connections;
+  average_n_compatible_fragments_lax /= n_connections;
+
+  std::cout << "# connections: " << n_connections << std::endl;
+  std::cout << "Average number of compatible connections per connection: " << average_n_compatible_connections << std::endl;
+  std::cout << "Average number of compatible fragments per connection (strict): " << average_n_compatible_fragments_strict << std::endl;
+  std::cout << "Average number of compatible fragments per connection (lax): " << average_n_compatible_fragments_lax << std::endl;
 
   // If requested, print the ConnectionCompatibilities to the standard output.
   if (verbose) {
-    query_results.GetConnectionCompatibilities().Print();
+    compatibilities.Print();
   };
 
   // Signal success.

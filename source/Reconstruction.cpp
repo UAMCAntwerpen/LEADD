@@ -1,13 +1,13 @@
 #include "Reconstruction.hpp"
 
 // Definition of the version integer of the ReconstructedMol & associated classes.
-extern const unsigned reconstruction_version = 20200610;
+extern const unsigned reconstruction_version = 20210611;
 
 // Definition of a variable that keeps track of whether the RDKit::MolPickler was configured.
 bool molpickler_configured = false;
 
 // Definition of a function to configure the RDKit::MolPickler to pickle RDKit::Atom properties.
-void ConfigureMolpickler() {
+void ConfigureMolPickler() {
   if (molpickler_configured) {
     return;
   };
@@ -70,6 +70,48 @@ SizeController::SizeController(unsigned max_size, float mean, float stdev, float
   };
 };
 
+int SizeController::Decide(unsigned size, bool can_stay_constant, bool can_grow, bool can_shrink, std::mt19937& prng) {
+  if (can_stay_constant) {
+    // Can do anything.
+    if (can_grow && can_shrink) {
+      return Decide(size, prng);
+    // Can stay the same or grow.
+    } else if (can_grow) {
+      if (DecideGrowth(size, prng)) {
+        return 1;
+      } else {
+        return 0;
+      };
+    // Can stay the same or shrink.
+    } else if (can_shrink) {
+      if (DecideShrinkage(size, prng)) {
+        return -1;
+      } else {
+        return 0;
+      };
+    // If it can only stay the same.
+    } else {
+      return 0;
+    };
+  // Can grow or shrink.
+  } else if (can_grow && can_shrink) {
+    if (DecideGrowth(size, prng)) {
+      return 1;
+    } else {
+      return -1;
+    };
+  // Can only grow.
+  } else if (can_grow) {
+    return 1;
+  // Can only shrink.
+  } else if (can_shrink) {
+    return -1;
+  // Can't do anything.
+  } else {
+    throw std::logic_error("Size control logic error.");
+  };
+};
+
 int SizeController::Decide(unsigned size, std::mt19937& prng) {
   if (size > max_size) {
     return -1;
@@ -97,6 +139,14 @@ bool SizeController::DecideGrowth(unsigned size, std::mt19937& prng) {
     return false;
   };
   return growth_distributions.at(size)(prng);
+};
+
+bool SizeController::DecideShrinkage(unsigned size, std::mt19937& prng) {
+  if (size == 0) {
+    return false;
+  } else {
+    return !DecideGrowth(size, prng);
+  };
 };
 
 float SizeController::NormalProbabilityDensity(unsigned size) const {
@@ -128,7 +178,7 @@ EvolutionReport::EvolutionReport(const std::string& output_directory_path) {
   scores_csv << "Generation,NScoringCalls,Scores\n";
   n_ring_atoms_csv << "Generation, NRings\n";
   operation_frequencies_csv << ",PeripheralExpansion,InternalExpansion,PeripheralDeletion,InternalDeletion,";
-  operation_frequencies_csv << "PeripheralSubstitution,InternalSubstitution,PeripheralCrossover,InternalCrossover,Translation,StereoFlip\n";
+  operation_frequencies_csv << "PeripheralSubstitution,InternalSubstitution,PeripheralTransfection,InternalTransfection,Translation,StereoFlip\n";
 };
 
 void EvolutionReport::WriteScores(unsigned generation, unsigned n_scoring_calls, const std::list<ReconstructedMol>& reconstructions) {
@@ -155,8 +205,8 @@ void EvolutionReport::WriteOperationFrequencies() {
   operation_frequencies_csv << attempt_frequencies["internal_deletion"] << ",";
   operation_frequencies_csv << attempt_frequencies["peripheral_substitution"] << ",";
   operation_frequencies_csv << attempt_frequencies["internal_substitution"] << ",";
-  operation_frequencies_csv << attempt_frequencies["peripheral_crossover"] << ",";
-  operation_frequencies_csv << attempt_frequencies["internal_crossover"] << ",";
+  operation_frequencies_csv << attempt_frequencies["peripheral_transfection"] << ",";
+  operation_frequencies_csv << attempt_frequencies["internal_transfection"] << ",";
   operation_frequencies_csv << attempt_frequencies["translation"] << ",";
   operation_frequencies_csv << attempt_frequencies["stereo_flip"] << "\n";
   operation_frequencies_csv << "NSuccess,";
@@ -166,8 +216,8 @@ void EvolutionReport::WriteOperationFrequencies() {
   operation_frequencies_csv << success_frequencies["internal_deletion"] << ",";
   operation_frequencies_csv << success_frequencies["peripheral_substitution"] << ",";
   operation_frequencies_csv << success_frequencies["internal_substitution"] << ",";
-  operation_frequencies_csv << success_frequencies["peripheral_crossover"] << ",";
-  operation_frequencies_csv << success_frequencies["internal_crossover"] << ",";
+  operation_frequencies_csv << success_frequencies["peripheral_transfection"] << ",";
+  operation_frequencies_csv << success_frequencies["internal_transfection"] << ",";
   operation_frequencies_csv << success_frequencies["translation"] << ",";
   operation_frequencies_csv << success_frequencies["stereo_flip"] << "\n";
 };
@@ -258,84 +308,16 @@ void EvolutionReport::Close() {
 // Default constructor that initializes empty variables.
 MolBrick::MolBrick() = default;
 
-// MolBrick constructor that doesn't assign new immutable indices to the Atoms
-// in the pseudomol, but instead keeps the ones of the Pseudofragment. Requires
-// that the Pseudofragment be flagged before, but the ConnectionsTable should still
-// be based on the "original" mutable indices assigned upon Peudofragment construction.
-MolBrick::MolBrick(const Pseudofragment& pseudofragment, unsigned pseudofragment_id, unsigned schidx, float wgt, ReconstructedMol* owner) :
-  Pseudofragment(pseudofragment), pseudofragment_id(pseudofragment_id), schematic_idx(schidx), weight(wgt), owner(owner) {
-  // Check that the Pseudofragment's Atoms have immutable atom indices.
-  for (const RDKit::Atom* atom : pseudomol.atoms()) {
-    if (!atom->hasProp("ImmutableIdx")) {
-      throw std::runtime_error("The indexless MolBrick constructor expects immutable indices to be pre-assigned to the Pseudofragment.");
-    } else {
-      unsigned immutable_atom_idx = atom->getProp<unsigned>("ImmutableIdx");
-      atom_indices.push_back(immutable_atom_idx);
-      if (immutable_atom_idx > max_atom_idx) {
-        max_atom_idx = immutable_atom_idx;
-      };
-    };
-  };
-  // Update the connection table using the immutable atom indices.
-  for (auto& c : connections) {
-    for (ConnectionPoint& cpoint : c.second) {
-      cpoint.atom_idx = pseudomol.getAtomWithIdx(cpoint.atom_idx)->getProp<unsigned>("ImmutableIdx");
-    };
-  };
-};
-
 // Copy-based MolBrick constructor. The Pseudofragment copy constructor
 // is called in place of the Pseudofragment base constructor in order
 // to copy the Pseudofragments attributes to the MolBrick. This leaves
 // a valid copy of the template Pseudofragment.
-MolBrick::MolBrick(const Pseudofragment & pseudofragment, unsigned pseudofragment_id, unsigned start_atom_idx, unsigned schidx, float wgt, ReconstructedMol* owner) :
+MolBrick::MolBrick(const Pseudofragment& pseudofragment, unsigned pseudofragment_id, unsigned start_atom_idx, unsigned schidx, float wgt, ReconstructedMol* owner) :
   Pseudofragment(pseudofragment), pseudofragment_id(pseudofragment_id), schematic_idx(schidx), weight(wgt), owner(owner) {
-  // Assign immutable atom indices to the Pseudofragment's atoms.
-  unsigned immutable_atom_idx = start_atom_idx;
-  for (RDKit::ROMol::AtomIterator ai = pseudomol.beginAtoms(); ai != pseudomol.endAtoms(); ++ai) {
-    (*ai)->setProp<unsigned>("ImmutableIdx", immutable_atom_idx);
-    atom_indices.push_back(immutable_atom_idx);
-    ++immutable_atom_idx;
-  };
-  max_atom_idx = immutable_atom_idx - 1;
-  // Update the connection table using the immutable atom indices.
-  for (auto& c : connections) {
-    for (ConnectionPoint& cpoint : c.second) {
-      cpoint.atom_idx = pseudomol.getAtomWithIdx(cpoint.atom_idx)->getProp<unsigned>("ImmutableIdx");
-    };
-  };
+  AssignImmutableAtomIndices(start_atom_idx);
 };
 
-// Move-based MolBrick constructor. The Pseudofragment's attributes
-// are moved to the MolBrick object instead of being copied. This
-// is more performant but leaves the Pseudofragment in an undefined
-// state.
-MolBrick::MolBrick(Pseudofragment & pseudofragment, unsigned pseudofragment_id, unsigned start_atom_idx, unsigned schidx, float wgt, ReconstructedMol * owner) :
-  pseudofragment_id(pseudofragment_id), schematic_idx(schidx), weight(wgt), owner(owner) {
-  // Move the Pseudofragment's attributes to the MolBrick.
-  pseudomol = std::move(pseudofragment.pseudomol);
-  connections = std::move(pseudofragment.connections);
-  smiles = std::move(pseudofragment.smiles);
-  has_ring = pseudofragment.has_ring;
-  ring_part = pseudofragment.ring_part;
-  level = pseudofragment.level;
-  // Assign immutable atom indices to the Pseudofragment's atoms.
-  unsigned immutable_atom_idx = start_atom_idx;
-  for (RDKit::ROMol::AtomIterator ai = pseudomol.beginAtoms(); ai != pseudomol.endAtoms(); ++ai) {
-    (*ai)->setProp<unsigned>("ImmutableIdx", immutable_atom_idx);
-    atom_indices.push_back(immutable_atom_idx);
-    ++immutable_atom_idx;
-  };
-  max_atom_idx = immutable_atom_idx - 1;
-  // Update the connection table using the immutable atom indices.
-  for (auto& c : connections) {
-    for (ConnectionPoint& cpoint : c.second) {
-      cpoint.atom_idx = pseudomol.getAtomWithIdx(cpoint.atom_idx)->getProp<unsigned>("ImmutableIdx");
-    };
-  };
-};
-
-bool MolBrick::operator== (const MolBrick & other) const {
+bool MolBrick::operator== (const MolBrick& other) const {
   return (smiles == other.smiles) && (ring_part == other.ring_part) && (owner == other.owner);
 };
 
@@ -445,7 +427,7 @@ ConnectionsTable MolBrick::GetAvailableConnections(std::mt19937& prng, const Mol
       if (transfer_weights) {
         // If more than one ConnectionPoint share the same atom index choose a random one.
         const ConnectionPoint* interactor_cpoint = owner->internal_connections.GetConnectionPointWithIdx(connection, interactor_idx, prng);
-        available_connections.AddConnection(connection, interactor_cpoint);
+        available_connections.AddConnection(connection, *interactor_cpoint);
       } else {
         available_connections.AddConnection(connection, interactor_idx);
       };
@@ -524,7 +506,7 @@ ConnectionsTable MolBrick::GetAvailableConnections(std::mt19937& prng, const std
       if (transfer_weights) {
         // If more than one ConnectionPoint share the same atom index choose a random one.
         interactor_cpoint = owner->internal_connections.GetConnectionPointWithIdx(connection, interactor_idx, prng);
-        available_connections.AddConnection(connection, interactor_cpoint);
+        available_connections.AddConnection(connection, *interactor_cpoint);
       } else {
         available_connections.AddConnection(connection, interactor_idx);
       };
@@ -533,18 +515,35 @@ ConnectionsTable MolBrick::GetAvailableConnections(std::mt19937& prng, const std
   return available_connections;
 };
 
-void MolBrick::UpdateImmutableIndices(unsigned start_atom_idx) {
-  std::unordered_map<unsigned, unsigned> atom_indices_map;
+void MolBrick::AssignImmutableAtomIndices(unsigned start_atom_idx) {
   atom_indices.clear();
+  // Assign immutable atom indices to the Pseudofragment's atoms.
   unsigned immutable_atom_idx = start_atom_idx;
-  for (RDKit::ROMol::AtomIterator ai = pseudomol.beginAtoms(); ai != pseudomol.endAtoms(); ++ai) {
-    atom_indices_map.insert({ (*ai)->getProp<unsigned>("ImmutableIdx"), immutable_atom_idx });
-    (*ai)->setProp<unsigned>("ImmutableIdx", immutable_atom_idx);
+  for (RDKit::Atom* atom : pseudomol.atoms()) {
+    atom->setProp<unsigned>("ImmutableIdx", immutable_atom_idx);
     atom_indices.push_back(immutable_atom_idx);
     ++immutable_atom_idx;
   };
   max_atom_idx = immutable_atom_idx - 1;
+  // Update the connection table using the immutable atom indices.
+  for (auto& c : connections) {
+    for (ConnectionPoint& cpoint : c.second) {
+      cpoint.atom_idx = pseudomol.getAtomWithIdx(cpoint.atom_idx)->getProp<unsigned>("ImmutableIdx");
+    };
+  };
+};
 
+void MolBrick::UpdateImmutableAtomIndices(unsigned start_atom_idx) {
+  atom_indices.clear();
+  std::unordered_map<unsigned, unsigned> atom_indices_map;
+  unsigned immutable_atom_idx = start_atom_idx;
+  for (RDKit::Atom* atom : pseudomol.atoms()) {
+    atom_indices_map.insert({ atom->getProp<unsigned>("ImmutableIdx"), immutable_atom_idx });
+    atom->setProp<unsigned>("ImmutableIdx", immutable_atom_idx);
+    atom_indices.push_back(immutable_atom_idx);
+    ++immutable_atom_idx;
+  };
+  max_atom_idx = immutable_atom_idx - 1;
   // Update the connection table using the immutable atom indices.
   // This approach might also be better for the MolBrick constructor.
   for (auto& c : connections) {
@@ -576,6 +575,36 @@ const std::vector<unsigned>& MolBrick::GetImmutableAtomIndices() const {
 
 float MolBrick::GetWeight() const {
   return weight;
+};
+
+
+// Standalone function to retrieve a pointer to the Atom with the specified immutable index.
+RDKit::Atom* GetAtomWithImmutableIdx(RDKit::RWMol& pseudomol, unsigned immutable_atom_idx) {
+  for (RDKit::Atom* atom : pseudomol.atoms()) {
+    if (atom->getProp<unsigned>("ImmutableIdx") == immutable_atom_idx) {
+      return atom;
+    };
+  };
+  throw std::runtime_error("Atom retrieval failed.");
+};
+
+// Standalone function to convert pseudomol immutable atom indices into their mutable counterparts.
+unsigned GetMutableAtomIdx(const RDKit::RWMol& pseudomol, unsigned immutable_atom_idx) {
+  for (const RDKit::Atom* atom : pseudomol.atoms()) {
+    if (atom->getProp<unsigned>("ImmutableIdx") == immutable_atom_idx) {
+      return atom->getIdx();
+    };
+  };
+  throw std::runtime_error("Atom idx retrieval failed.");
+};
+
+std::vector<unsigned> GetMutableAtomIndices(const RDKit::RWMol& pseudomol, const std::vector<unsigned>& immutable_atom_indices) {
+  std::vector<unsigned> mutable_atom_indices;
+  mutable_atom_indices.reserve(immutable_atom_indices.size());
+  for (unsigned immutable_atom_idx : immutable_atom_indices) {
+    mutable_atom_indices.push_back(GetMutableAtomIdx(pseudomol, immutable_atom_idx));
+  };
+  return mutable_atom_indices;
 };
 
 
@@ -729,6 +758,7 @@ void ReconstructionSchematic::PrintBondTypeMatrix() const {
   };
 };
 
+
 // Class ReconstructionsInventory
 ReconstructionsInventory::ReconstructionsInventory() = default;
 ReconstructionsInventory::ReconstructionsInventory(float gamma) : gamma(gamma) {};
@@ -738,59 +768,34 @@ ReconstructionsInventory::ReconstructionsInventory(const std::list<Reconstructed
   };
 };
 
-void ReconstructionsInventory::Add(const MolBrick & brick) {
-  if (brick.has_ring) {
-    ring.push_back(brick);
-  } else if (brick.ring_part) {
-    ring_part.push_back(brick);
-  } else {
+void ReconstructionsInventory::Add(const MolBrick& brick) {
+  if (!brick.HasRing() && !brick.IsRingPart()) {
     acyclic.push_back(brick);
   };
+  if (brick.HasRing()) {
+    ring.push_back(brick);
+  };
+  if (brick.IsRingPart()) {
+    ring_part.push_back(brick);
+  };
 };
 
-void ReconstructionsInventory::Add(const ReconstructedMol & reconstruction) {
-  for (const auto& brick : reconstruction.bricks) {
+void ReconstructionsInventory::Add(const ReconstructedMol& reconstruction) {
+  for (const auto& brick : reconstruction.GetBricks()) {
     Add(brick.second);
   };
 };
 
-void ReconstructionsInventory::Add(const ReconstructedMol * reconstruction) {
-  for (const auto& brick : reconstruction->bricks) {
-    Add(brick.second);
-  };
-};
 
-void ReconstructionsInventory::Remove(const ReconstructedMol & reconstruction) {
-  for (const auto& brick : reconstruction.bricks) {
+void ReconstructionsInventory::Remove(const ReconstructedMol& reconstruction) {
+  for (const auto& brick : reconstruction.GetBricks()) {
     Remove(brick.second);
   };
 };
 
-void ReconstructionsInventory::Remove(const ReconstructedMol * reconstruction) {
-  for (const auto& brick : reconstruction->bricks) {
-    Remove(brick.second);
-  };
-};
-
-void ReconstructionsInventory::Remove(const MolBrick & brick) {
+void ReconstructionsInventory::Remove(const MolBrick& brick) {
   std::vector<MolBrick>::iterator it, end_it;
-  if (brick.has_ring) {
-    end_it = ring.end();
-    it = std::find(ring.begin(), end_it, brick);
-    assert(it != end_it);
-    if (it != end_it - 1) {
-      *it = std::move(ring.back());
-    };
-    ring.pop_back();
-  } else if (brick.ring_part) {
-    end_it = ring_part.end();
-    it = std::find(ring_part.begin(), end_it, brick);
-    assert(it != end_it);
-    if (it != end_it - 1) {
-      *it = std::move(ring_part.back());
-    };
-    ring_part.pop_back();
-  } else {
+  if (!brick.HasRing() && !brick.IsRingPart()) {
     end_it = acyclic.end();
     it = std::find(acyclic.begin(), end_it, brick);
     assert(it != end_it);
@@ -799,21 +804,33 @@ void ReconstructionsInventory::Remove(const MolBrick & brick) {
     };
     acyclic.pop_back();
   };
+  if (brick.HasRing()) {
+    end_it = ring.end();
+    it = std::find(ring.begin(), end_it, brick);
+    assert(it != end_it);
+    if (it != end_it - 1) {
+      *it = std::move(ring.back());
+    };
+    ring.pop_back();
+  };
+  if (brick.IsRingPart()) {
+    end_it = ring_part.end();
+    it = std::find(ring_part.begin(), end_it, brick);
+    assert(it != end_it);
+    if (it != end_it - 1) {
+      *it = std::move(ring_part.back());
+    };
+    ring_part.pop_back();
+  };
 };
 
-void ReconstructionsInventory::SubmitToAdditionQueue(const MolBrick * brick) {
-  addition_queue.push_back(*brick);
-};
 
-void ReconstructionsInventory::SubmitToAdditionQueue(const MolBrick & brick) {
+void ReconstructionsInventory::SubmitToAdditionQueue(const MolBrick& brick) {
   addition_queue.push_back(brick);
 };
 
-void ReconstructionsInventory::SubmitToDeletionQueue(const MolBrick * brick) {
-  deletion_queue.push_back(*brick);
-};
 
-void ReconstructionsInventory::SubmitToDeletionQueue(const MolBrick & brick) {
+void ReconstructionsInventory::SubmitToDeletionQueue(const MolBrick& brick) {
   deletion_queue.push_back(brick);
 };
 
@@ -832,15 +849,15 @@ void ReconstructionsInventory::CommitQueuedOperations() {
     Remove(brick);
   };
   ClearQueues();
-  assert(addition_queue.empty());
-  assert(deletion_queue.empty());
 };
 
 void ReconstructionsInventory::CalcAcyclicWeights() {
   acyclic_weights.clear();
   acyclic_weights.reserve(acyclic.size());
   for (const MolBrick& brick : acyclic) {
-    acyclic_weights.push_back(brick.weight * std::pow(brick.owner->score, gamma));
+    float owner_score = brick.GetOwner()->GetScore();
+    float weight = brick.GetWeight() * std::pow(owner_score, gamma);
+    acyclic_weights.push_back(weight);
   };
 };
 
@@ -848,7 +865,9 @@ void ReconstructionsInventory::CalcRingWeights() {
   ring_weights.clear();
   ring_weights.reserve(ring.size());
   for (const MolBrick& brick : ring) {
-    ring_weights.push_back(brick.weight * std::pow(brick.owner->score, gamma));
+    float owner_score = brick.GetOwner()->GetScore();
+    float weight = brick.GetWeight() * std::pow(owner_score, gamma);
+    ring_weights.push_back(weight);
   };
 };
 
@@ -856,7 +875,9 @@ void ReconstructionsInventory::CalcRingPartWeights() {
   ring_part_weights.clear();
   ring_part_weights.reserve(ring_part.size());
   for (const MolBrick& brick : ring_part) {
-    ring_part_weights.push_back(brick.weight * std::pow(brick.owner->score, gamma));
+    float owner_score = brick.GetOwner()->GetScore();
+    float weight = brick.GetWeight() * std::pow(owner_score, gamma);
+    ring_part_weights.push_back(weight);
   };
 };
 
@@ -902,6 +923,49 @@ const std::vector<float>& ReconstructionsInventory::GetRingPartBrickWeights() co
 
 const std::vector<float>& ReconstructionsInventory::GetAcyclicBrickWeights() const {
   return acyclic_weights;
+};
+
+bool ReconstructionsInventory::Contains(const MolBrick& brick) const {
+  if (!brick.HasRing() && !brick.IsRingPart()) {
+    std::vector<MolBrick>::const_iterator it = std::find(acyclic.begin(), acyclic.end(), brick);
+    if (it == acyclic.end()) {
+      return false;
+    };
+  };
+  if (brick.HasRing()) {
+    std::vector<MolBrick>::const_iterator it = std::find(ring.begin(), ring.end(), brick);
+    if (it == ring.end()) {
+      return false;
+    };
+  };
+  if (brick.IsRingPart()) {
+    std::vector<MolBrick>::const_iterator it = std::find(ring_part.begin(), ring_part.end(), brick);
+    if (it == ring_part.end()) {
+      return false;
+    };
+  };
+  return true;
+};
+
+bool ReconstructionsInventory::Contains(const ReconstructedMol& reconstruction) const {
+  for (const auto& [brick_schematic_idx, brick] : reconstruction.GetBricks()) {
+    bool inventory_contains_brick = Contains(brick);
+    if (!inventory_contains_brick) {
+      return false;
+    };
+  };
+  return true;
+};
+
+void ReconstructionsInventory::Print() const {
+  std::cout << "Acyclic bricks:" << std::endl;
+  for (const MolBrick& brick : acyclic) {
+    std::cout << brick.GetConnectionEncodingSMILES() << std::endl;
+  };
+  std::cout << "Ring bricks:" << std::endl;
+  for (const MolBrick& brick : ring) {
+    std::cout << brick.GetConnectionEncodingSMILES() << std::endl;
+  };
 };
 
 
@@ -965,7 +1029,7 @@ void DeletionPoint::Evaluate(ConnectionCompatibilities& compatibilities, std::mt
       for (const auto& cp : c.second) {
         vtx_ids_connections.insert({ id, &c.first });
         for (MolBrick* other_neighbor : other_neighbors) {
-          if (neighbors_available_connections[other_neighbor].IsCompatibleWith(c.first, compatibilities)) {
+          if (compatibilities.AreCompatible(neighbors_available_connections[other_neighbor], c.first)) {
             edges.push_back(std::make_pair(neighbors_vtx_ids[other_neighbor], id));
           };
         };
@@ -1042,7 +1106,7 @@ void DeletionPoint::GenerateMatchings(ConnectionCompatibilities& compatibilities
         for (const auto& cp : c.second) {
           vtx_ids_connections.insert({ id, &c.first });
           for (MolBrick* other_neighbor : other_neighbors) {
-            if (neighbors_available_connections[other_neighbor].IsCompatibleWith(c.first, compatibilities)) {
+            if (compatibilities.AreCompatible(neighbors_available_connections[other_neighbor], c.first)) {
               edges.push_back(std::make_pair(neighbors_vtx_ids[other_neighbor], id));
             };
           };
@@ -1073,6 +1137,7 @@ void DeletionPoint::GenerateMatchings(ConnectionCompatibilities& compatibilities
   };
   generated_all_matchings = true;
 };
+
 
 // Class SubstitutionPoint
 SubstitutionPoint::SubstitutionPoint(MolBrick* substitutable, bool guided) :
@@ -1152,7 +1217,7 @@ void SubstitutionPoint::PrepareHopcroftKarp(std::mt19937& prng) {
   hopcroft_ready = true;
 };
 
-PATH SubstitutionPoint::HopcroftKarp(const MolBrick & substitute, ConnectionCompatibilities & compatibilities, std::mt19937 & prng) {
+PATH SubstitutionPoint::HopcroftKarp(const MolBrick& substitute, ConnectionCompatibilities& compatibilities, std::mt19937& prng) {
   // IMPROVE: Better BipartiteGraph construction.
   // Assign IDs to the Vertices that will represent the neighbor's
   // compatible Connections in the BipartiteGraph.
@@ -1167,7 +1232,7 @@ PATH SubstitutionPoint::HopcroftKarp(const MolBrick & substitute, ConnectionComp
     for (const auto& cp : c.second) {
       vtx_ids_connections.insert({ vtx_id, &c.first });
       for (const auto& nac : neighbors_available_connections) {
-        if (nac.second.IsCompatibleWith(c.first, compatibilities)) {
+        if (compatibilities.AreCompatible(nac.second, c.first)) {
           used_bricks.insert(nac.first);
           edges.push_back(std::make_pair(neighbors_vtx_ids[nac.first], vtx_id));
         };
@@ -1236,13 +1301,15 @@ void SubstitutionPoint::EvaluateSubstitutability(ConnectionQueryResults& query_r
     if (substitutable->has_ring) {
       if (has_acyclic_substitutes) {
         rings_can_be_removed = true;
-      } else {
+      };
+      if (has_ring_substitutes) {
         rings_can_be_kept_constant = true;
       };
     } else {
       if (has_ring_substitutes) {
         rings_can_be_added = true;
-      } else {
+      };
+      if (has_acyclic_substitutes) {
         rings_can_be_kept_constant = true;
       };
     };
@@ -1251,7 +1318,7 @@ void SubstitutionPoint::EvaluateSubstitutability(ConnectionQueryResults& query_r
   evaluated = true;
 };
 
-void SubstitutionPoint::EvaluateSubstitutability(ReconstructionsInventory & inventory, ConnectionCompatibilities & compatibilities, std::mt19937 & prng) {
+void SubstitutionPoint::EvaluateSubstitutability(ReconstructionsInventory& inventory, ConnectionCompatibilities& compatibilities, std::mt19937& prng) {
   assert(!evaluated);
   assert(hopcroft_ready);
   PATH matching;
@@ -1952,11 +2019,11 @@ void InsertionPoint::GenerateMatchingsForBrick(const MolBrick* brick, Connection
     for (const auto& c : brick->GetConnections()) {
       for (const auto& cp : c.second) {
         vtx_ids_connections.insert({ id, &c.first });
-        if (owner_available_connections.IsCompatibleWith(c.first, compatibilities)) {
+        if (compatibilities.AreCompatible(owner_available_connections, c.first)) {
           edges.push_back(std::make_pair(1, id));
         };
         for (MolBrick* neighbor : neighbors_combination) {
-          if (neighbors_available_connections[neighbor].IsCompatibleWith(c.first, compatibilities)) {
+          if (compatibilities.AreCompatible(neighbors_available_connections[neighbor], c.first)) {
             edges.push_back(std::make_pair(neighbors_vtx_ids[neighbor], id));
           };
         };
@@ -2102,17 +2169,37 @@ const std::map<unsigned, std::vector<GeneticLogEntry>>& GeneticLog::GetEntries()
 };
 
 
+std::tuple<bool, bool, bool> EvaluateConnectionsTableFragmentCompatibility(const ConnectionsTable& connections, const ConnectionQueryResults& query_results) {
+  // Evaluates what kind of Pseudofragments are compatible with the ConnectionsTable.
+  bool acyclic_compatible = false, ring_compatible = false, ring_part_compatible = false;
+  for (const auto& [connection, cpoints] : connections) {
+    if (!query_results.GetAcyclicResults().at(connection).at(1).first.empty()) {
+      acyclic_compatible = true;
+    };
+    if (!query_results.GetRingResults().at(connection).at(1).first.empty()) {
+      ring_compatible = true;
+    };
+    if (!query_results.GetRingPartResults().at(connection).at(1).first.empty()) {
+      ring_part_compatible = true;
+    };
+    if (acyclic_compatible && ring_compatible && ring_part_compatible) {
+      break;
+    };
+  };
+  return {acyclic_compatible, ring_compatible, ring_part_compatible};
+};
+
+
 // Class ReconstructedMol
 ReconstructedMol::ReconstructedMol() = default;
-ReconstructedMol::ReconstructedMol(const MolBrick & brick) :
+ReconstructedMol::ReconstructedMol(const MolBrick& brick) :
   pseudomol(brick.pseudomol),
   connections(brick.connections),
-  level(brick.level),
   max_atom_idx(brick.max_atom_idx),
   max_schematic_idx(brick.schematic_idx) {
   assert(brick.schematic_idx == 0);
   if (brick.HasRing()) {
-    n_ring_atoms = brick.level;
+    n_ring_atoms = brick.GetSize();
   } else {
     n_ring_atoms = 0;
   };
@@ -2120,131 +2207,153 @@ ReconstructedMol::ReconstructedMol(const MolBrick & brick) :
   schematic.UnitSchematic();
 };
 
-int ReconstructedMol::EvaluatePeripheralCompatibility(ConnectionQueryResults & query_results) const {
-  // Evaluates what kind of Pseudofragments can be annealed in a Peripheral
-  // Expansion by consulting the ConnectionQueryResults.
-  // Possible return values:
-  //  -1 = Can only be expanded with acyclic Pseudofragments.
-  //   0 = Can be expanded with both acyclic and ring Pseudofragments (including ring_parts).
-  //   1 = Can only be expanded with cyclic Pseudofragments.
-  bool ring_compatible = false, acyclic_compatible = false;
-
-  // Loop over the peripheral Connections. If it is still unknown if the
-  // ReconstructedMol can bind peripherally Pseudofragments of a specific type,
-  // check if the Connection supports said type of fragment.
-  for (const auto& c : connections) {
-    const Connection& connection = c.first;
-    if (!ring_compatible) {
-      if (query_results.ring[connection][1].first.size() > 0) {
-        ring_compatible = true;
-      };
-    };
-    if (!acyclic_compatible) {
-      if (query_results.acyclic[connection][1].first.size() > 0) {
-        acyclic_compatible = true;
-      };
-    };
-    // If it has been determined that the ReconstructedMol can bind both
-    // cylic and acyclic Pseudofragments, return this evaluation and shortcircuit.
-    if (ring_compatible && acyclic_compatible) {
-      return 0;
+ReconstructedMol::ReconstructedMol(const RDKit::ROMol& molecule, const FragmentationSettings& settings, bool names_as_scores) :
+  pseudomol(molecule) {
+  // Converts a regular molecular graph (RDKit::ROMol) into a meta-graph (ReconstructedMol).
+  // Since the latter is a more information rich data structure the following
+  // compromises must be made:
+  //  - The ReconstructedMol's and its parent's IDs are both 0. The user should
+  //    manually set these if desired.
+  //  - All constituent MolBricks have ID and weight 0, and it's assumed they
+  //    aren't part of the PseudofragmentDB.
+  //  - The systematic fragmentation scheme is atom-based. This ensures that no
+  //    atom contributes to more than one MolBrick.
+  //  - Connections between MolBricks are initialized according to the strict
+  //    compatibility definition (i.e. input molecule is the source molecule).
+  FragmentationSettings tmp_settings = settings;
+  tmp_settings.SetSystematicFragmentation(FragmentationSettings::SystematicFragmentation::LINEAR);
+  tmp_settings.SetMinFragmentSize(0);
+  tmp_settings.SetMaxFragmentSize(0);
+  // Calculate the atom types for the input molecule.
+  std::vector<std::uint32_t> atom_types = GetAtomTypes(molecule, tmp_settings);
+  // Fragment the molecule into Pseudofragments.
+  std::vector<Pseudofragment> pseudofragments = MakePseudofragments(pseudomol, tmp_settings);
+  // Initialize the ReconstructionSchematic.
+  schematic.Expand(pseudofragments.size());
+  // Use the Pseudofragments to define the MolBricks.
+  for (size_t brick_schematic_idx = 0; brick_schematic_idx < pseudofragments.size(); ++brick_schematic_idx) {
+    const Pseudofragment& pseudofragment = pseudofragments[brick_schematic_idx];
+    auto [it, emplaced] = bricks.emplace(std::piecewise_construct, std::forward_as_tuple(brick_schematic_idx), std::forward_as_tuple(pseudofragment, 0, max_atom_idx + 1, brick_schematic_idx, 0, this));
+    max_atom_idx = it->second.max_atom_idx;
+    max_schematic_idx = brick_schematic_idx;
+    if (pseudofragment.HasRing()) {
+      n_ring_atoms += pseudofragment.GetSize();
     };
   };
-
-  // If the ReconstructedMol can't bind both types of Pseudofragments it can
-  // only bind one. Return with the corresponding value.
-  if (acyclic_compatible) {
-    return -1;
-  } else if (ring_compatible) {
-    return 1;
-  } else {
-    // In theory, during fragmentation, when a bond is broken and a Connection
-    // is defined there ought to be atleast one compatible Pseudofragment.
-    // However, when defining fragments through a subgraph search, bonds
-    // connecting to peripheral atoms are only broken into Connections on the
-    // internal side of the molecule, whereas on the peripheral side no path of
-    // 2 atoms length can be defined. While peripheral atoms will still be
-    // represented in the database, if the compatibility definition used when
-    // precalculating compatible Pseudofragments is too strict, some connections
-    // won't be deemed compatible with any Pseudofragment. This might occur to
-    // exclusively peripheral functional groups (e.g. nitro) when using a high
-    // stringency level (e.g. 4).
-    return -2;
+  // Assign the same MolBrick immutable atom indices to the ReconstructedMol's pseudomol.
+  for (const auto& [brick_schematic_idx, brick] : bricks) {
+    for (const RDKit::Atom* brick_atom : brick.pseudomol.atoms()) {
+      // Retrieve the equivalent ReconstructedMol atom.
+      unsigned old_atom_idx = brick_atom->getProp<unsigned>("OldIdx");
+      unsigned immutable_atom_idx = brick_atom->getProp<unsigned>("ImmutableIdx");
+      RDKit::Atom* reconstruction_atom = pseudomol.getAtomWithIdx(old_atom_idx);
+      // Flag the equivalent atom with the same immutable atom index.
+      reconstruction_atom->setProp<unsigned>("ImmutableIdx", immutable_atom_idx);
+    };
+  };
+  // Iterate over the MolBricks to fill the ReconstructionSchematic.
+  for (const auto& [brick_schematic_idx, brick] : bricks) {
+    // Iterate over the MolBrick's atoms.
+    for (const RDKit::Atom* brick_atom : brick.pseudomol.atoms()) {
+      // Retrieve the equivalent ReconstructedMol atom.
+      unsigned old_atom_idx = brick_atom->getProp<unsigned>("OldIdx");
+      unsigned immutable_atom_idx = brick_atom->getProp<unsigned>("ImmutableIdx");
+      RDKit::Atom* reconstruction_atom = pseudomol.getAtomWithIdx(old_atom_idx);
+      // Define iterators to check if an atom pertains to the MolBrick.
+      std::vector<unsigned>::const_iterator brick_atom_it, brick_begin_atom_it = brick.atom_indices.begin(), brick_end_atom_it = brick.atom_indices.end();
+      // Iterate over the neighbors of the equivalent atom.
+      RDKit::ROMol::ADJ_ITER neighbor_atom_it, neighbor_atom_end_it;
+      std::tie(neighbor_atom_it, neighbor_atom_end_it) = pseudomol.getAtomNeighbors(reconstruction_atom);
+      while (neighbor_atom_it != neighbor_atom_end_it) {
+        // Check if the neighboring atom is part of the same MolBrick.
+        const RDKit::Atom* neighbor_atom = pseudomol.getAtomWithIdx(*neighbor_atom_it);
+        unsigned old_neighbor_atom_idx = neighbor_atom->getProp<unsigned>("OldIdx");
+        unsigned immutable_neighbor_atom_idx = neighbor_atom->getProp<unsigned>("ImmutableIdx");
+        brick_atom_it = std::find(brick_begin_atom_it, brick_end_atom_it, immutable_neighbor_atom_idx);
+        // If it isn't:
+        if (brick_atom_it == brick_end_atom_it) {
+          // Define the Connection between the atoms.
+          const RDKit::Bond* bond = pseudomol.getBondBetweenAtoms(old_atom_idx, old_neighbor_atom_idx);
+          std::uint32_t atom_type = atom_types[old_atom_idx];
+          std::uint32_t neighbor_atom_type = atom_types[old_neighbor_atom_idx];
+          std::uint32_t bond_type = bond_type_int_table[bond->getBondType()];
+          Connection connection (atom_type, neighbor_atom_type, bond_type);
+          internal_connections.AddConnection(connection, immutable_atom_idx);
+          // Add the Connection to the internal ConnectionsTable.
+          // Find the neighboring MolBrick to which the neighboring atom pertains.
+          for (const auto& [neighbor_brick_schematic_idx, neighbor_brick] : bricks) {
+            std::vector<unsigned>::const_iterator neighbor_brick_atom_it = std::find(neighbor_brick.atom_indices.begin(), neighbor_brick.atom_indices.end(), immutable_neighbor_atom_idx);
+            // Once found, record the brick-neighbor relationship in the schematic.
+            if (neighbor_brick_atom_it != neighbor_brick.atom_indices.end()) {
+              schematic.adjacency[brick_schematic_idx][neighbor_brick_schematic_idx] = 1;
+              schematic.adjacency[neighbor_brick_schematic_idx][brick_schematic_idx] = 1;
+              schematic.start_atom_idx[brick_schematic_idx][neighbor_brick_schematic_idx] = immutable_atom_idx;
+              schematic.start_atom_idx[neighbor_brick_schematic_idx][brick_schematic_idx] = immutable_neighbor_atom_idx;
+              schematic.end_atom_idx[brick_schematic_idx][neighbor_brick_schematic_idx] = immutable_neighbor_atom_idx;
+              schematic.end_atom_idx[neighbor_brick_schematic_idx][brick_schematic_idx] = immutable_atom_idx;
+              schematic.start_atom_type[brick_schematic_idx][neighbor_brick_schematic_idx] = atom_type;
+              schematic.start_atom_type[neighbor_brick_schematic_idx][brick_schematic_idx] = neighbor_atom_type;
+              schematic.end_atom_type[brick_schematic_idx][neighbor_brick_schematic_idx] = neighbor_atom_type;
+              schematic.end_atom_type[neighbor_brick_schematic_idx][brick_schematic_idx] = atom_type;
+              schematic.bond_type[brick_schematic_idx][neighbor_brick_schematic_idx] = bond_type;
+              schematic.bond_type[neighbor_brick_schematic_idx][brick_schematic_idx] = bond_type;
+              break;
+            };
+          };
+        };
+        ++neighbor_atom_it;
+      };
+    };
+  };
+  // If required, use the molecule's original name as its score.
+  if (names_as_scores) {
+    score = std::stof(pseudomol.getProp<std::string>("_Name"));
   };
 };
 
-int ReconstructedMol::EvaluateBrickSet(const std::vector<MolBrick*>& b) const {
-  // Evaluates the types of MolBricks that form a set.
-  // Possible return values:
-  //  -1 = Consists of only acyclic MolBricks.
-  //   0 = Consists of both acyclic and cyclic MolBricks (including ring_parts).
-  //   1 = Consists of only cyclic MolBricks.
-  bool contains_rings = false;
-  bool contains_acyclics = false;
-  for (const MolBrick* brick : b) {
-    if (brick->has_ring || brick->ring_part) {
-      contains_rings = true;
-    } else {
-      contains_acyclics = true;
-    };
-    if (contains_rings && contains_acyclics) {
-      return 0;
-    };
-  };
-  if (contains_acyclics) {
-    return -1;
-  } else if (contains_rings) {
-    return 1;
-  };
-  throw std::runtime_error(std::string("Brick set evaluation failed\n"));
-};
-
-std::pair<const Connection*, const ConnectionPoint*> ReconstructedMol::ChoosePeripheralConnectionPoint(ConnectionQueryResults& query_results, bool has_ring, bool ring_part, std::mt19937& prng) const {
+std::pair<const Connection*, const ConnectionPoint*> ReconstructedMol::ChoosePeripheralConnectionPoint(const ConnectionQueryResults& query_results, bool has_ring, bool ring_part, std::mt19937& prng) const {
   // Initialize vectors to contain the candidate Connections and their weights.
   std::vector<const Connection*> candidates;
   std::vector<float> weights;
   candidates.reserve(connections.n_connection_points);
   weights.reserve(connections.n_connection_points);
-
-  // If the weight should be calculated based on ring Pseudofragments:
-  if (has_ring) {
+  if (!has_ring && !ring_part) {
     // For each peripheral Connection
-    for (const auto& c : connections) {
+    for (const auto& [connection, cpoints] : connections) {
       // Retrieve the compatible Pseudofragments
-      QUERY_RESULT& qr = query_results.ring[c.first][1];
+      const QUERY_RESULT& qr = query_results.GetAcyclicResults().at(connection).at(1);
       // Sum their weights and use it as the Connection weight.
       float weights_sum = 0;
       for (float weight : qr.second) {
         weights_sum += weight;
       };
       // Store the Connection and its weight.
-      candidates.push_back(&c.first);
-      weights.push_back(weights_sum);
-    };
-  // If the weight should be calculated based on ring_part Pseudofragments:
-  } else if (ring_part) {
-    for (const auto& c : connections) {
-      QUERY_RESULT& qr = query_results.ring_part[c.first][1];
-      float weights_sum = 0;
-      for (float weight : qr.second) {
-        weights_sum += weight;
-      };
-      candidates.push_back(&c.first);
-      weights.push_back(weights_sum);
-    };
-  // If the weight should be calculated based on acyclic Pseudofragments:
-  } else {
-    for (const auto& c : connections) {
-      QUERY_RESULT& qr = query_results.acyclic[c.first][1];
-      float weights_sum = 0;
-      for (float weight : qr.second) {
-        weights_sum += weight;
-      };
-      candidates.push_back(&c.first);
+      candidates.push_back(&connection);
       weights.push_back(weights_sum);
     };
   };
-
+  if (has_ring) {
+    for (const auto& [connection, cpoints] : connections) {
+      const QUERY_RESULT& qr = query_results.GetRingResults().at(connection).at(1);
+      float weights_sum = 0;
+      for (float weight : qr.second) {
+        weights_sum += weight;
+      };
+      candidates.push_back(&connection);
+      weights.push_back(weights_sum);
+    };
+  };
+  if (ring_part) {
+    for (const auto& [connection, cpoints] : connections) {
+      const QUERY_RESULT& qr = query_results.GetRingPartResults().at(connection).at(1);
+      float weights_sum = 0;
+      for (float weight : qr.second) {
+        weights_sum += weight;
+      };
+      candidates.push_back(&connection);
+      weights.push_back(weights_sum);
+    };
+  };
   // Perform a weighted selection of the Connection.
   std::discrete_distribution<unsigned> distribution(weights.begin(), weights.end());
   const Connection* chosen_connection = candidates[distribution(prng)];
@@ -2261,90 +2370,51 @@ std::pair<const Connection*, const ConnectionPoint*> ReconstructedMol::ChoosePer
     };
   };
   const ConnectionPoint* chosen_cpoint = &cpoints[idx];
-  return std::make_pair(chosen_connection, chosen_cpoint);
+  return {chosen_connection, chosen_cpoint};
 };
 
 std::pair<const Connection*, const ConnectionPoint*> ReconstructedMol::ChoosePeripheralConnectionPoint(bool has_ring, bool ring_part, std::mt19937& prng) const {
-  // Initialize vectors to contain the candidate ConnectionPoints and their weights.
   std::vector<std::pair<const Connection*, const ConnectionPoint*>> candidates;
   std::vector<float> weights;
   candidates.reserve(connections.n_connection_points);
   weights.reserve(connections.n_connection_points);
-
-  // If the weight should be calculated based on ring Pseudofragments:
-  if (has_ring) {
-    // For each ConnectionPoint
-    for (const auto& c : connections) {
-      for (const auto& cp : c.second) {
-        // Sum up the current weights of the compatible ring Pseudofragments.
+  if (!has_ring && !ring_part) {
+    for (const auto& [connection, cpoints] : connections) {
+      for (const ConnectionPoint& cpoint : cpoints) {
         float weights_sum = 0;
-        for (float weight : cp.weights.GetRingWeights()) {
+        for (float weight : cpoint.weights.GetAcyclicWeights()) {
           weights_sum += weight;
         };
-        // Store the ConnectionPoint and its weight.
-        candidates.push_back({ &c.first, &cp });
-        weights.push_back(weights_sum);
-      };
-    };
-  // If the weight should be calculated based on ring_part Pseudofragments:
-  } else if (ring_part) {
-    for (const auto& c : connections) {
-      for (const auto& cp : c.second) {
-        float weights_sum = 0;
-        for (float weight : cp.weights.GetRingPartWeights()) {
-          weights_sum += weight;
-        };
-        candidates.push_back({ &c.first, &cp });
-        weights.push_back(weights_sum);
-      };
-    };
-  // If the weight should be calculated based on acyclic Pseudofragments:
-  } else {
-    for (const auto& c : connections) {
-      for (const auto& cp : c.second) {
-        float weights_sum = 0;
-        for (float weight : cp.weights.GetAcyclicWeights()) {
-          weights_sum += weight;
-        };
-        candidates.push_back({ &c.first, &cp });
+        candidates.push_back({&connection, &cpoint});
         weights.push_back(weights_sum);
       };
     };
   };
-
+  if (has_ring) {
+    for (const auto& [connection, cpoints] : connections) {
+      for (const ConnectionPoint& cpoint : cpoints) {
+        float weights_sum = 0;
+        for (float weight : cpoint.weights.GetRingWeights()) {
+          weights_sum += weight;
+        };
+        candidates.push_back({&connection, &cpoint});
+        weights.push_back(weights_sum);
+      };
+    };
+  };
+  if (ring_part) {
+    for (const auto& [connection, cpoints] : connections) {
+      for (const ConnectionPoint& cpoint : cpoints) {
+        float weights_sum = 0;
+        for (float weight : cpoint.weights.GetRingPartWeights()) {
+          weights_sum += weight;
+        };
+        candidates.push_back({&connection, &cpoint});
+        weights.push_back(weights_sum);
+      };
+    };
+  };
   // Perform the weighted selection.
-  std::discrete_distribution<unsigned> distribution(weights.begin(), weights.end());
-  return candidates[distribution(prng)];
-};
-
-MolBrick* ReconstructedMol::ChooseBrickFromSet(const std::vector<MolBrick*>& b, bool has_ring, bool ring_part, std::mt19937 & prng) const {
-  unsigned n_bricks = b.size();
-  std::vector<MolBrick*> candidates;
-  std::vector<float> weights;
-  candidates.reserve(n_bricks);
-  weights.reserve(n_bricks);
-  if (has_ring) {
-    for (MolBrick* brick : b) {
-      if (brick->has_ring) {
-        candidates.push_back(brick);
-        weights.push_back(brick->weight);
-      };
-    };
-  } else if (ring_part) {
-    for (MolBrick* brick : b) {
-      if (brick->ring_part) {
-        candidates.push_back(brick);
-        weights.push_back(brick->weight);
-      };
-    };
-  } else {
-    for (MolBrick* brick : b) {
-      if (!brick->has_ring && !brick->ring_part) {
-        candidates.push_back(brick);
-        weights.push_back(brick->weight);
-      };
-    };
-  };
   std::discrete_distribution<unsigned> distribution(weights.begin(), weights.end());
   return candidates[distribution(prng)];
 };
@@ -2359,7 +2429,7 @@ const MolBrick* ReconstructedMol::GetAtomSourceBrick(unsigned immutable_atom_idx
       return &brick.second;
     };
   };
-  throw std::runtime_error(std::string("The provided immutable atom index isn't part of any of the ReconstructedMol's MolBricks. Sanity has been lost."));
+  throw std::runtime_error("The provided immutable atom index isn't part of any of the ReconstructedMol's MolBricks. Sanity has been lost.");
 };
 
 std::vector<MolBrick*> ReconstructedMol::GetPeripheralBricks() {
@@ -2408,7 +2478,7 @@ std::vector<MolBrick*> ReconstructedMol::GetInternalBricks() {
 
 
 // ReconstructedMol's genetic algorithm operator functions.
-bool ReconstructedMol::PeripheralExpansion(sqlite3_stmt* select_statement, ConnectionQueryResults& query_results, SizeController& controller, std::mt19937& prng, bool guided, bool update_stereo) {
+bool ReconstructedMol::PeripheralExpansion(const PseudofragmentDB& database, ConnectionQueryResults& query_results, SizeController& controller, std::mt19937& prng, bool guided, bool update_stereo) {
   // In a peripheral expansion a new Pseudofragment is annealed to one of the
   // free connection points of the ReconstructedMol.
 
@@ -2417,63 +2487,51 @@ bool ReconstructedMol::PeripheralExpansion(sqlite3_stmt* select_statement, Conne
     return false;
   };
 
-  // Evaluate with which kind of Pseudofragments the ReconstructedMol can be expanded:
-  //  -1 = Can only be expanded with acyclic Pseudofragments.
-  //   0 = Can be expanded with both acyclic and ring Pseudofragments (including ring_parts).
-  //   1 = Can only be expanded with cyclic Pseudofragments.
-  int compatibility = EvaluatePeripheralCompatibility(query_results);
-  if (compatibility == -2) {
+  // Evaluate with which kind of Pseudofragments the ReconstructedMol can be expanded.
+  auto[acyclic_compatible, ring_compatible, ring_part_compatible] = EvaluateConnectionsTableFragmentCompatibility(connections, query_results);
+  if (!acyclic_compatible && !ring_compatible && !ring_part_compatible) {
+    // In theory, during fragmentation, when a bond is broken and a Connection
+    // is defined there ought to be atleast one compatible Pseudofragment.
+    // However, when defining fragments systematically, bonds connecting to
+    // peripheral atoms are only broken into Connections on the internal side of
+    // the molecule, whereas on the peripheral side no path of 2 atoms length can
+    // be defined. While peripheral atoms will still be represented in the database,
+    // if the compatibility definition used when precalculating compatible
+    // Pseudofragments is too strict, some connections won't be deemed compatible
+    // with any Pseudofragment. This might occur to exclusively peripheral
+    // functional groups (e.g. nitro) when using a high stringency level.
     std::cout << "WARNING: No compatible Pseudofragments were found for a Connection." << std::endl;
     return false;
   };
 
-  // If both kinds of Pseudofragments can be annealed, decide which one to use.
-  // Otherwise, use the only type that can be used.
+  // Decide which type of fragment to add. Currently ring parts aren't supported.
+  int decision = controller.Decide(n_ring_atoms, acyclic_compatible, ring_compatible, false, prng);
   bool add_ring = false;
-  if (compatibility == 0) {
-    if (n_ring_atoms < controller.max_size) {
-      add_ring = controller.DecideChange(n_ring_atoms, prng);
-    };
-  } else if (compatibility == 1) {
-    // If the peripheral Connections are only compatible with ring Pseudofragments
-    // but the maximum number of rings was already reached, signal failure.
-    if (n_ring_atoms >= controller.max_size) {
-      return false;
-    };
+  if (decision == 1) {
     add_ring = true;
-  };
-
-  bool has_ring = false, ring_part = false;
-  if (add_ring) {
-    has_ring = true;
   };
 
   // Perform a weighted selection of a peripheral ConnectionPoint that is compatible
   // with the specified type of Pseudofragment, as well as a compatible Pseudofragment.
   std::pair<const Connection*, const ConnectionPoint*> choice;
-  unsigned pseudofragment_id;
-  float pseudofragment_weight;
+  unsigned pseudofragment_id = 0;
+  float pseudofragment_weight = 0;
   if (guided) {
     // If guided evolution is enabled the weights used to select the ConnectionPoint
     // are those of the ConnectionPoints themselves.
-    choice = ChoosePeripheralConnectionPoint(has_ring, ring_part, prng);
+    choice = ChoosePeripheralConnectionPoint(add_ring, false, prng);
     // Get the IDs and weights of the Pseudofragments that are compatible with the
     // chosen Connection.
     const std::vector<unsigned>* ids;
     const std::vector<float>* weights;
-    if (has_ring) {
+    if (add_ring) {
       ids = &choice.second->ids.GetRingIDs();
       weights = &choice.second->weights.GetRingWeights();
-    } else if (ring_part) {
-      ids = &choice.second->ids.GetRingPartIDs();
-      weights = &choice.second->weights.GetRingPartWeights();
     } else {
       ids = &choice.second->ids.GetAcyclicIDs();
       weights = &choice.second->weights.GetAcyclicWeights();
     };
-    // Check if any compatible fragments exist. If they do, sample the ID of
-    // one of them randomly. If not, signal function failure. The latter should
-    // almost never be the case (see EvaluatePeripheralCompatibility).
+    // Check if any compatible fragments exist..
     if (ids->empty()) {
       return false;
     };
@@ -2483,14 +2541,12 @@ bool ReconstructedMol::PeripheralExpansion(sqlite3_stmt* select_statement, Conne
     pseudofragment_id = (*ids)[idx];
     pseudofragment_weight = (*weights)[idx];
   } else {
-    // If the evolution isn't guided the ConnectionQueryResults weights are used to
-    // select a Connection and thereafter a random ConnectionPoint is chosen.
-    choice = ChoosePeripheralConnectionPoint(query_results, has_ring, ring_part, prng);
+    // If the evolution isn't guided the ConnectionQueryResults weights are used
+    // to select a Connection and thereafter a random ConnectionPoint is chosen.
+    choice = ChoosePeripheralConnectionPoint(query_results, add_ring, false, prng);
     const QUERY_RESULT* qr;
-    if (has_ring) {
+    if (add_ring) {
       qr = &query_results.ring[*choice.first][1];
-    } else if (ring_part) {
-      qr = &query_results.ring_part[*choice.first][1];
     } else {
       qr = &query_results.acyclic[*choice.first][1];
     };
@@ -2505,15 +2561,15 @@ bool ReconstructedMol::PeripheralExpansion(sqlite3_stmt* select_statement, Conne
   // Unpack the chosen Connection and ConnectionPoint's atom index.
   Connection chosen_connection = *choice.first;
   unsigned immutable_reconstruction_interactor_idx = choice.second->atom_idx;
-  RDKit::Bond::BondType bond_type = int_bond_type_table[chosen_connection.bond_type];
+  RDKit::Bond::BondType bond_type = int_bond_type_table[chosen_connection.GetBondType()];
 
   // Retrieve the Pseudofragment with the specified ID.
-  Pseudofragment pseudofragment = GetPseudofragmentByIDFromDB(pseudofragment_id, select_statement);
+  auto[pseudofragment, pseudofragment_frequency] = database.SelectPseudofragmentWithID(pseudofragment_id);
 
   // Determine which ReconstructionSchematic index should be assigned to the
   // new MolBrick. If any indices became available due to a deletion, take one
   // of them. If not, assign a new one.
-  unsigned schematic_idx;
+  unsigned schematic_idx = 0;
   if (available_schematic_idxs.empty()) {
     schematic.Expand();
     schematic_idx = max_schematic_idx + 1;
@@ -2528,7 +2584,7 @@ bool ReconstructedMol::PeripheralExpansion(sqlite3_stmt* select_statement, Conne
 
   // For the chosen ReconstructedMol's ConnectionPoint, randomly choose a
   // compatible interaction atom on the MolBrick.
-  Connection compatible_connection = brick.connections.GetRandomCompatibleConnection(chosen_connection, query_results.compatibilities, prng);
+  Connection compatible_connection = query_results.compatibilities.GetRandomCompatibleConnection(brick.connections, chosen_connection, prng);
   const CONNECTION_POINT_VECTOR& brick_cpoint_vector = brick.connections[compatible_connection];
   unsigned n_connections = brick_cpoint_vector.size();
   unsigned connection_idx = 0;
@@ -2598,9 +2654,8 @@ bool ReconstructedMol::PeripheralExpansion(sqlite3_stmt* select_statement, Conne
   schematic.end_atom_idx[brick.schematic_idx][interactor_schematic_idx] = immutable_reconstruction_interactor_idx;
 
   // Update the rest of the ReconstructedMol's attributes.
-  level += brick.level;
   if (add_ring) {
-    n_ring_atoms += brick.level;
+    n_ring_atoms += brick.GetSize();
   };
   max_atom_idx = brick.max_atom_idx;
   bricks.insert({ brick.schematic_idx, brick });
@@ -2616,11 +2671,14 @@ bool ReconstructedMol::PeripheralExpansion(sqlite3_stmt* select_statement, Conne
     AssignUnspecifiedStereochemistry(prng);
   };
 
+  // Verify that the Connection compatibility rules are respected.
+  assert(ObeysConnectionCompatibilityRules(query_results.GetConnectionCompatibilities()));
+
   // Signal function success.
   return true;
 };
 
-bool ReconstructedMol::InternalExpansion(sqlite3_stmt* select_statement, ConnectionQueryResults& query_results, SizeController& controller, std::mt19937& prng, bool guided, bool update_stereo) {
+bool ReconstructedMol::InternalExpansion(const PseudofragmentDB& database, ConnectionQueryResults& query_results, SizeController& controller, std::mt19937& prng, bool guided, bool update_stereo) {
   // In an internalExpansion a Pseudofragment is inserted between one of the
   // ReconstructedMol's MolBricks and a combination of the MolBrick's neighbors.
 
@@ -2636,38 +2694,47 @@ bool ReconstructedMol::InternalExpansion(sqlite3_stmt* select_statement, Connect
   std::vector<InsertionPoint> insertion_points;
   insertion_points.reserve(internal_bricks.size());
   for (MolBrick* brick : internal_bricks) {
-    // IMPROVE: Check to see if the number of combinations is
-    // below the max multiple intersections.
-    insertion_points.push_back(InsertionPoint(brick, prng, guided));
+    insertion_points.emplace_back(brick, prng, guided);
   };
 
-  // Evaluate if the operation could increase the number of rings. Note that
-  // in case it couldn't it doesn't mean that acyclic inserts exist either.
-  bool rings_can_be_added = false;
-  if (n_ring_atoms < controller.max_size) {
-    for (InsertionPoint& ip : insertion_points) {
-      ip.RetrieveRingInserts(query_results);
-      if (ip.has_ring_inserts) {
-        rings_can_be_added = true;
-        break;
+  // Evaluate what kind of inserts exist.
+  bool acyclic_inserts_exist = false, ring_inserts_exist = false;
+  for (InsertionPoint& ip : insertion_points) {
+    if (!acyclic_inserts_exist) {
+      ip.RetrieveAcyclicInserts(query_results);
+      if (ip.has_acyclic_inserts) {
+        acyclic_inserts_exist = true;
       };
     };
-  };
-
-  // Decide whether the number of rings should be increased or not.
-  bool increase_rings = false;
-  if (rings_can_be_added) {
-    if (n_ring_atoms < controller.max_size) {
-      increase_rings = controller.DecideChange(n_ring_atoms, prng);
+    if (!ring_inserts_exist) {
+      ip.RetrieveRingInserts(query_results);
+      if (ip.has_ring_inserts) {
+        ring_inserts_exist = true;
+      };
+    };
+    if (acyclic_inserts_exist && ring_inserts_exist) {
+      break;
     };
   };
 
-  // Retrieve the pertinent type of Pseudofragment inserts.
+  // If no inserts exist signal function failure.
+  if (!acyclic_inserts_exist && !ring_inserts_exist) {
+    return false;
+  };
+
+  // Decide how to modulate the number of rings.
+  int decision = controller.Decide(n_ring_atoms, acyclic_inserts_exist, ring_inserts_exist, false, prng);
+  bool add_ring = false;
+  if (decision == 1) {
+    add_ring = true;
+  };
+
+  // Retrieve the pertinent type of Pseudofragment inserts. Ring parts aren't supported.
   std::vector<InsertionPoint*> candidates;
   std::vector<float> candidates_weights;
   candidates.reserve(insertion_points.size());
   candidates_weights.reserve(insertion_points.size());
-  if (increase_rings) {
+  if (add_ring) {
     for (InsertionPoint& ip : insertion_points) {
       if (!ip.retrieved_ring_inserts) {
         ip.RetrieveRingInserts(query_results);
@@ -2690,12 +2757,7 @@ bool ReconstructedMol::InternalExpansion(sqlite3_stmt* select_statement, Connect
       };
     };
   };
-
-  // If no insertable Pseudofragments were found signal function failure.
-  if (candidates.empty()) {
-    assert(!increase_rings);
-    return false;
-  };
+  assert(!candidates.empty());
 
   // Choose an InsertionPoint through weighted selection, and sample a
   // Pseudofragment insert from it.
@@ -2704,7 +2766,7 @@ bool ReconstructedMol::InternalExpansion(sqlite3_stmt* select_statement, Connect
   MolBrick* owner = insertion_point->owner;
   unsigned owner_schematic_idx = owner->schematic_idx;
   std::tuple<MOLBRICKS_COMBINATION, CONNECTIONS_COMBINATION, unsigned, float> sample;
-  if (increase_rings) {
+  if (add_ring) {
     sample = insertion_point->SampleRingInsert(prng);
   } else {
     sample = insertion_point->SampleAcyclicInsert(prng);
@@ -2715,7 +2777,7 @@ bool ReconstructedMol::InternalExpansion(sqlite3_stmt* select_statement, Connect
 
   // Retrieve the Pseudofragment with the specified ID.
   unsigned pseudofragment_id = std::get<2>(sample);
-  Pseudofragment pseudofragment = GetPseudofragmentByIDFromDB(pseudofragment_id, select_statement);
+  auto[pseudofragment, pseudofragment_frequency] = database.SelectPseudofragmentWithID(pseudofragment_id);
 
   // Determine which ReconstructionSchematic index should be assigned to the
   // new MolBrick. If any indices became available due to a deletion, take one
@@ -2769,11 +2831,11 @@ bool ReconstructedMol::InternalExpansion(sqlite3_stmt* select_statement, Connect
   for (const auto& c : insert.connections) {
     for (const auto& cp : c.second) {
       vtx_ids_connections.insert({ id, &c.first });
-      if (owner_available_connections.IsCompatibleWith(c.first, query_results.compatibilities)) {
+      if (query_results.compatibilities.AreCompatible(owner_available_connections, c.first)) {
         edges.push_back(std::make_pair(1, id));
       };
       for (MolBrick* neighbor : neighbors_combination) {
-        if (insertion_point->neighbors_available_connections[neighbor].IsCompatibleWith(c.first, query_results.compatibilities)) {
+        if (query_results.compatibilities.AreCompatible(insertion_point->neighbors_available_connections[neighbor], c.first)) {
           edges.push_back(std::make_pair(neighbors_vtx_ids[neighbor], id));
         };
       };
@@ -2823,7 +2885,7 @@ bool ReconstructedMol::InternalExpansion(sqlite3_stmt* select_statement, Connect
       });
     assert(it != matching.end());
     new_forward_connection = *vtx_ids_connections[(*it)->GetEnd()->GetID()];
-    new_backward_connection = neighbor_available_connections.GetRandomCompatibleConnection(new_forward_connection, query_results.compatibilities, prng);
+    new_backward_connection = query_results.compatibilities.GetRandomCompatibleConnection(neighbor_available_connections, new_forward_connection, prng);
 
     const CONNECTION_POINT_VECTOR& insert_cpoint_vector = insert_available_connections[new_forward_connection];
     unsigned n_connections = insert_cpoint_vector.size();
@@ -2855,7 +2917,7 @@ bool ReconstructedMol::InternalExpansion(sqlite3_stmt* select_statement, Connect
 
     ConnectionPoint* cpoint = internal_connections.AddConnection(new_forward_connection, insert_interactor_idx);
     if (guided) {
-      query_results.AssignFreshWeights(new_forward_connection, cpoint);
+      query_results.AssignFreshWeights(new_forward_connection, *cpoint);
     };
     insert_available_connections.RemoveConnection(new_forward_connection, insert_interactor_idx);
     connections.MoveConnectionTo(new_backward_connection, new_neighbor_interactor_idx, internal_connections);
@@ -2899,7 +2961,7 @@ bool ReconstructedMol::InternalExpansion(sqlite3_stmt* select_statement, Connect
     });
   assert(it != matching.end());
   new_forward_connection = *vtx_ids_connections[(*it)->GetEnd()->GetID()];
-  new_backward_connection = owner_available_connections.GetRandomCompatibleConnection(new_forward_connection, query_results.compatibilities, prng);
+  new_backward_connection = query_results.compatibilities.GetRandomCompatibleConnection(owner_available_connections, new_forward_connection, prng);
 
   const CONNECTION_POINT_VECTOR& insert_cpoint_vector = insert_available_connections[new_forward_connection];
   unsigned n_connections = insert_cpoint_vector.size();
@@ -2931,7 +2993,7 @@ bool ReconstructedMol::InternalExpansion(sqlite3_stmt* select_statement, Connect
 
   ConnectionPoint* cpoint = internal_connections.AddConnection(new_forward_connection, insert_interactor_idx);
   if (guided) {
-    query_results.AssignFreshWeights(new_forward_connection, cpoint);
+    query_results.AssignFreshWeights(new_forward_connection, *cpoint);
   };
   insert_available_connections.RemoveConnection(new_forward_connection, insert_interactor_idx);
   connections.MoveConnectionTo(new_backward_connection, owner_interactor_idx, internal_connections);
@@ -2975,9 +3037,8 @@ bool ReconstructedMol::InternalExpansion(sqlite3_stmt* select_statement, Connect
   };
 
   // Update the rest of the ReconstructedMol's attributes.
-  level += insert.level;
-  if (increase_rings) {
-    n_ring_atoms += insert.level;
+  if (add_ring) {
+    n_ring_atoms += insert.GetSize();
   };
   max_atom_idx = insert.max_atom_idx;
   bricks.insert({ insert_schematic_idx, insert });
@@ -2993,12 +3054,15 @@ bool ReconstructedMol::InternalExpansion(sqlite3_stmt* select_statement, Connect
     AssignUnspecifiedStereochemistry(prng);
   };
 
+  // Verify that the Connection compatibility rules are respected.
+  assert(ObeysConnectionCompatibilityRules(query_results.GetConnectionCompatibilities()));
+
   // Signal function success.
   return true;
 };
 
 
-bool ReconstructedMol::PeripheralDeletion(SizeController & controller, std::mt19937 & prng, bool guided, bool update_stereo) {
+bool ReconstructedMol::PeripheralDeletion(SizeController& controller, std::mt19937& prng, bool guided, bool update_stereo) {
   // In a peripheral deletion one of the peripheral MolBricks of the
   // ReconstructedMol (that is, a MolBrick bound through a single Connection
   // to the rest of the ReconstructedMol) is deleted.
@@ -3012,39 +3076,40 @@ bool ReconstructedMol::PeripheralDeletion(SizeController & controller, std::mt19
   // Retrieve the peripheral MolBricks that are candidates to be deleted.
   std::vector<MolBrick*> peripheral_bricks = GetPeripheralBricks();
 
-  // Evaluate the type of the peripheral MolBricks.
-  // Possible return values:
-  //  -1 = Consists of only acyclic MolBricks.
-  //   0 = Consists of both acyclic and cyclic MolBricks (including ring_parts).
-  //   1 = Consists of only cyclic MolBricks.
-  int evaluation = EvaluateBrickSet(peripheral_bricks);
-
-  // If the peripheral bricks include both cyclic and acyclic instances,
-  // decide if the number of rings should be reduced. Otherwise, remove
-  // whatever type of brick is available.
-  bool delete_ring = false;
-  if (evaluation == -1) {
-    delete_ring = false;
-  } else if (evaluation == 0) {
-    delete_ring = controller.DecideChange(n_ring_atoms, prng);
-  } else if (evaluation == 1) {
-    delete_ring = true;
+  // Evaluate the type of peripheral MolBricks.
+  bool has_acyclic_bricks = false, has_ring_bricks = false;
+  for (MolBrick* brick : peripheral_bricks) {
+    if (!brick->HasRing() && !brick->IsRingPart()) {
+      has_acyclic_bricks = true;
+    };
+    if (brick->HasRing()) {
+      has_ring_bricks = true;
+    };
   };
 
-  bool has_ring, ring_part;
-  if (delete_ring) {
-    has_ring = true;
-    ring_part = false;
-  } else {
-    has_ring = false;
-    ring_part = false;
+  // Decide how to modulate the number of rings.
+  int decision = controller.Decide(n_ring_atoms, has_acyclic_bricks, false, has_ring_bricks, prng);
+  bool delete_ring = false;
+  if (decision == -1) {
+    delete_ring = true;
   };
 
   // Perform a weighted selection of the desired type of MolBrick. The selection
   // is weighted for "fairness" reasons, since the expansion selections are
-  // weighted. If  deletions weren't weighted there would be an influx/outflux
+  // weighted. If deletions weren't weighted there would be an influx/outflux
   // imbalance for less frequent MolBricks.
-  MolBrick* brick = ChooseBrickFromSet(peripheral_bricks, has_ring, ring_part, prng);
+  std::vector<MolBrick*> brick_candidates;
+  std::vector<float> brick_weights;
+  brick_candidates.reserve(peripheral_bricks.size());
+  brick_weights.reserve(peripheral_bricks.size());
+  for (MolBrick* brick : peripheral_bricks) {
+    if (brick->HasRing() == delete_ring) {
+      brick_candidates.push_back(brick);
+      brick_weights.push_back(brick->weight);
+    };
+  };
+  std::discrete_distribution<size_t> distribution(brick_weights.begin(), brick_weights.end());
+  MolBrick* brick = brick_candidates[distribution(prng)];
 
   // Get the mutable atom indices of the MolBrick to be deleted.
   std::vector<unsigned> brick_mutable_atom_indices = GetMutableAtomIndices(pseudomol, brick->atom_indices);
@@ -3097,9 +3162,8 @@ bool ReconstructedMol::PeripheralDeletion(SizeController & controller, std::mt19
   available_schematic_idxs.push_back(brick->schematic_idx);
 
   // Update the rest of the ReconstructedMol's attributes.
-  level -= brick->level;
   if (delete_ring) {
-    n_ring_atoms -= brick->level;
+    n_ring_atoms -= brick->GetSize();
   };
   bricks.erase(brick->schematic_idx);
   sanitized_mol_updated = false;
@@ -3119,7 +3183,7 @@ bool ReconstructedMol::PeripheralDeletion(SizeController & controller, std::mt19
 };
 
 
-bool ReconstructedMol::InternalDeletion(ConnectionQueryResults & query_results, SizeController & controller, std::mt19937 & prng, bool guided, bool update_stereo) {
+bool ReconstructedMol::InternalDeletion(ConnectionQueryResults& query_results, SizeController& controller, std::mt19937& prng, bool guided, bool update_stereo) {
   // In an internal deletion one of the internal MolBricks of the ReconstructedMol
   // (that is, a MolBrick bound to multiple neighboring MolBricks) is deleted.
   // To do so one of its neighbors must be able to connect to all of the other
@@ -3135,12 +3199,13 @@ bool ReconstructedMol::InternalDeletion(ConnectionQueryResults & query_results, 
   std::vector<DeletionPoint> deletion_points;
   deletion_points.reserve(internal_bricks.size());
   for (MolBrick* brick : internal_bricks) {
-    DeletionPoint deletion_point(brick);
+    deletion_points.emplace_back(brick);
+    DeletionPoint& deletion_point = deletion_points.back();
     // Evaluate whether the DeletionPoint pertains to a deletable MolBrick.
     // If it does, store it.
     deletion_point.Evaluate(query_results.compatibilities, prng);
-    if (deletion_point.is_deletable) {
-      deletion_points.push_back(std::move(deletion_point));
+    if (!deletion_point.is_deletable) {
+      deletion_points.pop_back();
     };
   };
 
@@ -3150,32 +3215,27 @@ bool ReconstructedMol::InternalDeletion(ConnectionQueryResults & query_results, 
   };
 
   // Evaluate how the InternalDeletion could modulate the number of rings.
-  bool rings_can_be_kept = false, rings_can_be_removed = false;
+  bool acyclic_bricks_can_be_removed = false, ring_bricks_can_be_removed = false;
   for (DeletionPoint& dp : deletion_points) {
     if (dp.has_ring) {
-      rings_can_be_removed = true;
+      ring_bricks_can_be_removed = true;
     } else {
-      rings_can_be_kept = true;
+      acyclic_bricks_can_be_removed = true;
     };
   };
 
   // Decide how the InternalDeletion should modulate the number of rings.
-  bool decrease_rings = false;
-  if (rings_can_be_kept && rings_can_be_removed) {
-    if (controller.DecideChange(n_ring_atoms, prng)) {
-      decrease_rings = true;
-    };
-  } else if (rings_can_be_removed) {
-    decrease_rings = true;
-  } else {
-    decrease_rings = false;
+  int decision = controller.Decide(n_ring_atoms, acyclic_bricks_can_be_removed, false, ring_bricks_can_be_removed, prng);
+  bool delete_ring = false;
+  if (decision == -1) {
+    delete_ring = true;
   };
 
   // Choose a DeletionPoint (i.e. MolBrick to be deleted)
   // through weighted selection.
   std::vector<DeletionPoint*> deletion_point_candidates;
   std::vector<float> deletion_point_weights;
-  if (decrease_rings) {
+  if (delete_ring) {
     for (DeletionPoint& dp : deletion_points) {
       if (dp.has_ring) {
         deletion_point_candidates.push_back(&dp);
@@ -3273,7 +3333,7 @@ bool ReconstructedMol::InternalDeletion(ConnectionQueryResults & query_results, 
 
     // Select random ConnectionPoints for the Maximum Bipartite Matching solution.
     new_forward_connection = *match.second;
-    new_backward_connection = neighbor_available_connections.GetRandomCompatibleConnection(new_forward_connection, query_results.compatibilities, prng);
+    new_backward_connection = query_results.compatibilities.GetRandomCompatibleConnection(neighbor_available_connections, new_forward_connection, prng);
 
     const CONNECTION_POINT_VECTOR& core_cpoint_vector = core_available_connections[new_forward_connection];
     n_connections = core_cpoint_vector.size();
@@ -3348,9 +3408,8 @@ bool ReconstructedMol::InternalDeletion(ConnectionQueryResults & query_results, 
   available_schematic_idxs.push_back(deleted_schematic_idx);
 
   // Update the rest of the ReconstructedMol's attributes.
-  level -= deleted->level;
-  if (decrease_rings) {
-    n_ring_atoms -= deleted->level;
+  if (delete_ring) {
+    n_ring_atoms -= deleted->GetSize();
   };
   bricks.erase(deleted_schematic_idx);
   sanitized_mol_updated = false;
@@ -3365,15 +3424,16 @@ bool ReconstructedMol::InternalDeletion(ConnectionQueryResults & query_results, 
     AssignUnspecifiedStereochemistry(prng);
   };
 
+  // Verify that the Connection compatibility rules are respected.
+  assert(ObeysConnectionCompatibilityRules(query_results.GetConnectionCompatibilities()));
+
   // Signal function success.
   return true;
 };
 
-
-bool ReconstructedMol::Substitution(const std::string & location, sqlite3_stmt * select_statement, ConnectionQueryResults & query_results, SizeController & controller, std::mt19937 & prng, bool guided, bool update_stereo) {
+bool ReconstructedMol::Substitution(const std::string& location, const PseudofragmentDB& database, ConnectionQueryResults& query_results, SizeController& controller, std::mt19937& prng, bool guided, bool update_stereo) {
   // In a substitution a peripheral or internal MolBrick is substituted by
-  // a Pseudofragment that has atleast the Connections involved in binding
-  // the substituted MolBrick to its neighbors.
+  // a suitable Pseudofragment from the Pseudofragment database.
 
   // Currently Substitutions aren't allowed when the ReconstructedMol consists
   // of a single MolBrick. While the Substitution of the only MolBrick for
@@ -3387,7 +3447,7 @@ bool ReconstructedMol::Substitution(const std::string & location, sqlite3_stmt *
   // Retrieve the ReconstructedMol's MolBricks of the type to be substituted
   // (i.e. peripheral or internal).
   std::vector<MolBrick*> bricks_to_evaluate;
-  unsigned n_bricks;
+  unsigned n_bricks = 0;
   if (location == "peripheral") {
     bricks_to_evaluate = GetPeripheralBricks();
     n_bricks = bricks_to_evaluate.size();
@@ -3403,33 +3463,29 @@ bool ReconstructedMol::Substitution(const std::string & location, sqlite3_stmt *
   } else {
     throw std::runtime_error("Invalid location option for Substitution.");
   };
+  assert(n_bricks > 0);
 
   // Convert the subject MolBricks into SubstitutionPoints.
   std::vector<SubstitutionPoint> substitution_points;
   substitution_points.reserve(n_bricks);
   for (MolBrick* brick : bricks_to_evaluate) {
-    substitution_points.push_back(SubstitutionPoint(brick, guided));
+    substitution_points.emplace_back(brick, guided);
   };
 
   // Loop over the identified SubstitutionPoints and evaluate how
   // the number of rings can be modulated.
-  bool substitutes_exist = false, rings_can_be_added = false, rings_can_be_removed = false, rings_can_be_kept_constant = false;
+  bool rings_can_be_kept_constant = false, rings_can_be_added = false, rings_can_be_removed = false;
   for (SubstitutionPoint& sp : substitution_points) {
     sp.EvaluateSubstitutability(query_results, prng);
     if (sp.has_substitutes) {
+      if (sp.rings_can_be_kept_constant) {
+        rings_can_be_kept_constant = true;
+      };
       if (sp.rings_can_be_added) {
-        if (n_ring_atoms < controller.max_size) {
-          rings_can_be_added = true;
-          substitutes_exist = true;
-        };
+        rings_can_be_added = true;
       };
       if (sp.rings_can_be_removed) {
         rings_can_be_removed = true;
-        substitutes_exist = true;
-      };
-      if (sp.rings_can_be_kept_constant) {
-        rings_can_be_kept_constant = true;
-        substitutes_exist = true;
       };
       if (rings_can_be_added && rings_can_be_removed && rings_can_be_kept_constant) {
         break;
@@ -3441,64 +3497,12 @@ bool ReconstructedMol::Substitution(const std::string & location, sqlite3_stmt *
   // may happen since due to the mismatch in the compatibility definition
   // stringency between genetic operators (e.g. PeripheralExpansion uses
   // a non-strict definition while Substitution uses a strict definition).
-  if (!substitutes_exist) {
+  if (!rings_can_be_kept_constant && !rings_can_be_added && !rings_can_be_removed) {
     return false;
   };
 
-  // If both kinds of Pseudofragments can be used as substitutes,
-  // decide which one to use. Otherwise, use the only type that can be used.
-  bool constant_rings = false, increase_rings = false, decrease_rings = false;
-  if (rings_can_be_kept_constant) {
-    // If the number of rings can be kept constant, increased or decreased:
-    if (rings_can_be_added && rings_can_be_removed) {
-      int decision = controller.Decide(n_ring_atoms, prng);
-      if (decision == 0) {
-        constant_rings = true;
-      } else if (decision == 1) {
-        increase_rings = true;
-      } else {
-        decrease_rings = true;
-      };
-      // If the number of rings can be kept constant or increased:
-    } else if (rings_can_be_added) {
-      bool change = false;
-      if (n_ring_atoms < controller.max_size) {
-        change = controller.DecideChange(n_ring_atoms, prng);
-      };
-      if (change) {
-        increase_rings = true;
-      } else {
-        constant_rings = true;
-      };
-      // If the number of rings can be kept constant or decreased:
-    } else if (rings_can_be_removed) {
-      bool change = controller.DecideChange(n_ring_atoms, prng);
-      if (change) {
-        decrease_rings = true;
-      } else {
-        constant_rings = true;
-      };
-      // If the number of rings can only be kept constant:
-    } else {
-      constant_rings = true;
-    };
-  } else if (rings_can_be_added) {
-    // If the number of rings can be increased or decreased:
-    if (rings_can_be_removed) {
-      bool grow = controller.DecideGrowth(n_ring_atoms, prng);
-      if (grow) {
-        increase_rings = true;
-      } else {
-        decrease_rings = true;
-      };
-      // If the number of rings can only be increased:
-    } else {
-      increase_rings = true;
-    };
-    // If the number of rings can only be decreased:
-  } else {
-    decrease_rings = true;
-  };
+  // Determine how to modulate the number of rings.
+  int decision = controller.Decide(n_ring_atoms, rings_can_be_kept_constant, rings_can_be_added, rings_can_be_removed, prng);
 
   // Loop over the subset of SubstitutionPoints and attempt to retrieve
   // substitute Pseudofragments for them that modify the ReconstructedMol's
@@ -3510,7 +3514,7 @@ bool ReconstructedMol::Substitution(const std::string & location, sqlite3_stmt *
   substitition_point_candidates.reserve(n_substitution_points);
   substitution_point_weights.reserve(n_substitution_points);
   // If the number of rings should be kept constant
-  if (constant_rings) {
+  if (decision == 0) {
     for (SubstitutionPoint& sp : substitution_points) {
       // and the SubstitutionPoint pertains to a ring MolBrick
       if (sp.has_ring) {
@@ -3537,7 +3541,7 @@ bool ReconstructedMol::Substitution(const std::string & location, sqlite3_stmt *
       };
     };
   // If the number of rings should be increased
-  } else if (increase_rings) {
+  } else if (decision == 1) {
     for (SubstitutionPoint& sp : substitution_points) {
       // and the SubstitutionPoint pertains to an acyclic MolBrick
       if (!sp.has_ring) {
@@ -3553,7 +3557,7 @@ bool ReconstructedMol::Substitution(const std::string & location, sqlite3_stmt *
       };
     };
   // If the number of rings should be decreased
-  } else if (decrease_rings) {
+  } else if (decision == -1) {
     for (SubstitutionPoint& sp : substitution_points) {
       // and the SubstitutionPoint pertains to a ring MolBrick
       if (sp.has_ring) {
@@ -3582,22 +3586,22 @@ bool ReconstructedMol::Substitution(const std::string & location, sqlite3_stmt *
   // Choose a MolBrick compatible with the aforementioned SubstitutionPoint
   // through weighted selection.
   std::tuple<CONNECTIONS_COMBINATION, unsigned, float> sample;
-  if (constant_rings) {
+  if (decision == 0) {
     if (substitution_point->has_ring) {
       sample = substitution_point->SampleRingSubstitute(prng);
     } else {
       sample = substitution_point->SampleAcyclicSubstitute(prng);
     };
-  } else if (increase_rings) {
+  } else if (decision == 1) {
     sample = substitution_point->SampleRingSubstitute(prng);
-  } else if (decrease_rings) {
+  } else if (decision == -1) {
     sample = substitution_point->SampleAcyclicSubstitute(prng);
   };
   unsigned pseudofragment_id = std::get<1>(sample);
   float pseudofragment_weight = std::get<2>(sample);
 
   // Retrieve the Pseudofragment with the specified ID and convert it to a MolBrick.
-  Pseudofragment pseudofragment = GetPseudofragmentByIDFromDB(pseudofragment_id, select_statement);
+  auto [pseudofragment, pseudofragment_frequency] = database.SelectPseudofragmentWithID(pseudofragment_id);
   MolBrick substitute(pseudofragment, pseudofragment_id, max_atom_idx + 1, brick_schematic_idx, pseudofragment_weight, this);
 
   // Reset the GeneticLog.
@@ -3645,7 +3649,7 @@ bool ReconstructedMol::Substitution(const std::string & location, sqlite3_stmt *
     for (const auto& cp : c.second) {
       vtx_ids_connections.insert({ id, &c.first });
       for (const auto& nac : substitution_point->neighbors_available_connections) {
-        if (nac.second.IsCompatibleWith(c.first, query_results.compatibilities)) {
+        if (query_results.compatibilities.AreCompatible(nac.second, c.first)) {
           edges.push_back(std::make_pair(neighbors_vtx_ids[nac.first], id));
         };
       };
@@ -3700,7 +3704,7 @@ bool ReconstructedMol::Substitution(const std::string & location, sqlite3_stmt *
       });
     int connection_vtx_id = (*m_it)->GetEnd()->GetID();
     new_forward_connection = *vtx_ids_connections[connection_vtx_id];
-    new_backward_connection = nac.second.GetRandomCompatibleConnection(new_forward_connection, query_results.compatibilities, prng);
+    new_backward_connection = query_results.compatibilities.GetRandomCompatibleConnection(nac.second, new_forward_connection, prng);
 
     const CONNECTION_POINT_VECTOR& brick_cpoint_vector = substitute_available_connections[new_forward_connection];
     n_connections = brick_cpoint_vector.size();
@@ -3726,7 +3730,7 @@ bool ReconstructedMol::Substitution(const std::string & location, sqlite3_stmt *
     // Add the new Connections.
     ConnectionPoint* cpoint = internal_connections.AddConnection(new_forward_connection, new_brick_interactor_idx);
     if (guided) {
-      query_results.AssignFreshWeights(new_forward_connection, cpoint);
+      query_results.AssignFreshWeights(new_forward_connection, *cpoint);
     };
     connections.MoveConnectionTo(new_backward_connection, new_neighbor_interactor_idx, internal_connections);
     substitute_available_connections.RemoveConnection(new_forward_connection, new_brick_interactor_idx);
@@ -3773,16 +3777,14 @@ bool ReconstructedMol::Substitution(const std::string & location, sqlite3_stmt *
   };
 
   // Update the rest of the ReconstructedMol's attributes.
-  level += (substitute.level - substituted->level);
-  // IMPROVE: Check that the ring number control still works
-  if (increase_rings) {
-    n_ring_atoms += substitute.level;
-  } else if (decrease_rings) {
-    n_ring_atoms -= substituted->level;
+  if (decision == 1) {
+    n_ring_atoms += substitute.GetSize();
+  } else if (decision == -1) {
+    n_ring_atoms -= substituted->GetSize();
   } else {
     if (substitute.has_ring || substituted->has_ring) {
       assert(substitute.has_ring && substituted->has_ring);
-      n_ring_atoms += (substitute.level - substituted->level);
+      n_ring_atoms += (substitute.GetSize() - substituted->GetSize());
     };
   };
   max_atom_idx = substitute.max_atom_idx;
@@ -3801,36 +3803,19 @@ bool ReconstructedMol::Substitution(const std::string & location, sqlite3_stmt *
     AssignUnspecifiedStereochemistry(prng);
   };
 
+  // Verify that the Connection compatibility rules are respected.
+  assert(ObeysConnectionCompatibilityRules(query_results.GetConnectionCompatibilities()));
+
   // Signal function success.
   return true;
 };
 
-bool ReconstructedMol::Crossover(const std::string & location, ConnectionQueryResults & query_results, SizeController & controller, std::mt19937 & prng, ReconstructionsInventory & inventory, bool guided, bool update_stereo) {
-  // In a crossover operation a MolBrick of the subject ReconstructedMol is
+bool ReconstructedMol::Transfection(const std::string& location, ConnectionQueryResults& query_results, SizeController& controller, std::mt19937& prng, ReconstructionsInventory& inventory, bool guided, bool update_stereo) {
+  // In a transfection operation a MolBrick of the subject ReconstructedMol is
   // substituted by one of the MolBricks forming part of the current pool of
   // ReconstructedMols.
 
-  // Note that this operation isn't a true genetic crossover since only the
-  // acceptor ReconstructedMol is modified, while the donor ReconstructedMol
-  // remains unchanged. The rationale behind this decision is as follows:
-  //  (1) All ReconstructedMols evolve every generation. This is done to optimize
-  //      the efficiency of each generation by minimizing the number of calls
-  //      to external scoring functions. If the Crossover operation affected
-  //      both parties it's likely that some ReconstructedMols would effectively
-  //      undergo multiple mutations every generation, which would be confounding.
-  //  (2) While the decision is score guided, all ReconstructedMols are allowed
-  //      to Crossover with all others. As such, if a true Crossover were to
-  //      take place between two ReconstructedMols with a large disparity in
-  //      their scores the best ReconstructedMol would incur a high risk of
-  //      becoming worse. In silico, since the "genetic material" can be
-  //      duplicated at will, we can afford a "greedy" evolution approach
-  //      where only one molecule benefits of the Crossover event.
-  //  (3) Related to the above, if a Crossover mutation were to modify two
-  //      ReconstructedMols, with one of them raising their score and the other
-  //      one lowering it, it would become unclear whether the operation was
-  //      beneficial and whether the changes should be kept or reverted.
-
-  // Currently Crossovers aren't allowed when the ReconstructedMol consists
+  // Currently Transfections aren't allowed when the ReconstructedMol consists
   // of a single MolBrick. While the substitution of the only MolBrick for
   // another random one would be possible it would imply completely disregarding
   // the starting base ReconstructedMol, which doesn't truely fit the definition
@@ -3842,7 +3827,7 @@ bool ReconstructedMol::Crossover(const std::string & location, ConnectionQueryRe
   // Retrieve the ReconstructedMol's MolBricks of the type to be substituted
   // (i.e. peripheral or internal).
   std::vector<MolBrick*> bricks_to_evaluate;
-  unsigned n_bricks;
+  unsigned n_bricks = 0;
   if (location == "peripheral") {
     bricks_to_evaluate = GetPeripheralBricks();
     n_bricks = bricks_to_evaluate.size();
@@ -3856,14 +3841,15 @@ bool ReconstructedMol::Crossover(const std::string & location, ConnectionQueryRe
       return false;
     };
   } else {
-    throw std::runtime_error(std::string("Invalid location option for Crossover."));
+    throw std::runtime_error("Invalid location option for Transfection.");
   };
+  assert(n_bricks > 0);
 
   // Convert the subject MolBricks into SubstitutionPoints.
   std::vector<SubstitutionPoint> substitution_points;
   substitution_points.reserve(n_bricks);
   for (MolBrick* brick : bricks_to_evaluate) {
-    substitution_points.push_back(SubstitutionPoint(brick, guided));
+    substitution_points.emplace_back(brick, guided);
   };
 
   // Loop over the SubstititutionPoints and do the necessary preparations
@@ -3872,18 +3858,18 @@ bool ReconstructedMol::Crossover(const std::string & location, ConnectionQueryRe
     sp.PrepareHopcroftKarp(prng);
   };
 
+  // If the ReconstructionsInventory was kept up to date it contains all MolBricks
+  // of the present ReconstructedMol. This guarantees the existance of at least
+  // one valid substitute (i.e. substitute MolBrick with itself).
+  bool rings_can_be_kept_constant = true;
+
   // Loop over the identified SubstitutionPoints and evaluate how
   // the number of rings can be modulated.
-  // NOTE: If the ReconstructionsInventory has been kept up to date it's guaranteed to
-  // contain atleast one valid substitute MolBrick: the substitutable MolBrick of the
-  // SubstitutionPoint. Hence, it's not crucial to assert that this is the case.
   bool rings_can_be_added = false, rings_can_be_removed = false;
   for (SubstitutionPoint& sp : substitution_points) {
     sp.EvaluateSubstitutability(inventory, query_results.compatibilities, prng);
     if (sp.rings_can_be_added) {
-      if (n_ring_atoms < controller.max_size) {
-        rings_can_be_added = true;
-      };
+      rings_can_be_added = true;
     };
     if (sp.rings_can_be_removed) {
       rings_can_be_removed = true;
@@ -3893,38 +3879,8 @@ bool ReconstructedMol::Crossover(const std::string & location, ConnectionQueryRe
     };
   };
 
-  // If both kinds of Pseudofragments can be used as substitutes,
-  // decide which one to use. Otherwise, use the only type that can be used.
-  bool constant_rings = false, increase_rings = false, decrease_rings = false;
-  if (rings_can_be_added && rings_can_be_removed) {
-    int decision = controller.Decide(n_ring_atoms, prng);
-    if (decision == 0) {
-      constant_rings = true;
-    } else if (decision == 1) {
-      increase_rings = true;
-    } else if (decision == -1) {
-      decrease_rings = true;
-    };
-  } else if (rings_can_be_added) {
-    bool change = false;
-    if (n_ring_atoms < controller.max_size) {
-      change = controller.DecideChange(n_ring_atoms, prng);
-    };
-    if (change) {
-      increase_rings = true;
-    } else {
-      constant_rings = true;
-    };
-  } else if (rings_can_be_removed) {
-    bool change = controller.DecideChange(n_ring_atoms, prng);
-    if (change) {
-      decrease_rings = true;
-    } else {
-      constant_rings = true;
-    };
-  } else {
-    constant_rings = true;
-  };
+  // Determine how to modulate the number of rings.
+  int decision = controller.Decide(n_ring_atoms, rings_can_be_kept_constant, rings_can_be_added, rings_can_be_removed, prng);
 
   // Loop over the subset of SubstitutionPoints and attempt to retrieve
   // substitute Pseudofragments for them that modify the ReconstructedMol's
@@ -3937,14 +3893,16 @@ bool ReconstructedMol::Crossover(const std::string & location, ConnectionQueryRe
   substitution_point_weights.reserve(n_substitution_points);
   bool substitutes_exist = false;
   // If the number of rings should be kept constant
-  if (constant_rings) {
+  if (decision == 0) {
     // Calculate the weights of both acyclic and ring MolBricks in the inventory.
     inventory.CalcWeights();
     for (SubstitutionPoint& sp : substitution_points) {
       // and the SubstitutionPoint pertains to a ring MolBrick
       if (sp.has_ring) {
         sp.RetrieveRingSubstitutes(inventory, query_results.compatibilities, prng);
-        assert(sp.has_ring_substitutes);
+        if (sp.has_ring_substitutes) {
+          substitutes_exist = true;
+        };
         sp.CalcInventoryRingBasedWeight();
         substitition_point_candidates.push_back(&sp);
         substitution_point_weights.push_back(sp.weight);
@@ -3952,14 +3910,16 @@ bool ReconstructedMol::Crossover(const std::string & location, ConnectionQueryRe
       } else {
         // retrieve acyclic substitutes.
         sp.RetrieveAcyclicSubstitutes(inventory, query_results.compatibilities, prng);
-        assert(sp.has_acyclic_substitutes);
+        if (sp.has_acyclic_substitutes) {
+          substitutes_exist = true;
+        };
         sp.CalcInventoryAcyclicBasedWeight();
         substitition_point_candidates.push_back(&sp);
         substitution_point_weights.push_back(sp.weight);
       };
     };
   // If the number of rings should be increased
-  } else if (increase_rings) {
+  } else if (decision == 1) {
     // Calculate the weights of the ring MolBricks in the inventory.
     inventory.CalcRingWeights();
     for (SubstitutionPoint& sp : substitution_points) {
@@ -3975,9 +3935,8 @@ bool ReconstructedMol::Crossover(const std::string & location, ConnectionQueryRe
         substitution_point_weights.push_back(sp.weight);
       };
     };
-    assert(substitutes_exist);
   // If the number of rings should be decreased
-  } else if (decrease_rings) {
+  } else if (decision == -1) {
     // Calculate the weights of the acyclic MolBricks in the inventory.
     inventory.CalcAcyclicWeights();
     for (SubstitutionPoint& sp : substitution_points) {
@@ -3993,8 +3952,8 @@ bool ReconstructedMol::Crossover(const std::string & location, ConnectionQueryRe
         substitution_point_weights.push_back(sp.weight);
       };
     };
-    assert(substitutes_exist);
   };
+  assert(substitutes_exist);
 
   // Choose a SubstitutionPoint (i.e. MolBrick to be substituted)
   // through weighted selection.
@@ -4007,7 +3966,7 @@ bool ReconstructedMol::Crossover(const std::string & location, ConnectionQueryRe
   // through weighted selection.
   INVENTORY_RESULT* inventory_result;
   // If the number of rings should be kept constant
-  if (constant_rings) {
+  if (decision == 0) {
     // and the SubstitutionPoint pertains to a ring MolBrick
     if (substitution_point->has_ring) {
       inventory_result = &substitution_point->inventory_ring_substitutes;
@@ -4016,10 +3975,10 @@ bool ReconstructedMol::Crossover(const std::string & location, ConnectionQueryRe
       inventory_result = &substitution_point->inventory_acyclic_substitutes;
     };
   // If the number of rings should be increased
-  } else if (increase_rings) {
+  } else if (decision == 1) {
     inventory_result = &substitution_point->inventory_ring_substitutes;
   // If the number of rings should be decreased
-  } else {
+  } else if (decision == -1){
     inventory_result = &substitution_point->inventory_acyclic_substitutes;
   };
   assert(!inventory_result->first.empty());
@@ -4033,7 +3992,7 @@ bool ReconstructedMol::Crossover(const std::string & location, ConnectionQueryRe
   // Create a copy of the substitute to update its attributes without affecting
   // the original substitute MolBrick (which is still part of the ReconstructionsInventory).
   MolBrick substitute = *inventory_substitute;
-  substitute.UpdateImmutableIndices(max_atom_idx + 1);
+  substitute.UpdateImmutableAtomIndices(max_atom_idx + 1);
   substitute.schematic_idx = brick_schematic_idx;
   substitute.owner = this;
 
@@ -4105,7 +4064,7 @@ bool ReconstructedMol::Crossover(const std::string & location, ConnectionQueryRe
       });
     int connection_vtx_id = (*m_it)->GetEnd()->GetID();
     new_forward_connection = *(substitution_point->vtx_ids_connections[connection_vtx_id]);
-    new_backward_connection = nac.second.GetRandomCompatibleConnection(new_forward_connection, query_results.compatibilities, prng);
+    new_backward_connection = query_results.compatibilities.GetRandomCompatibleConnection(nac.second, new_forward_connection, prng);
 
     const CONNECTION_POINT_VECTOR& brick_cpoint_vector = substitute_available_connections[new_forward_connection];
     n_connections = brick_cpoint_vector.size();
@@ -4131,7 +4090,7 @@ bool ReconstructedMol::Crossover(const std::string & location, ConnectionQueryRe
     // Add the new Connections.
     ConnectionPoint* cpoint = internal_connections.AddConnection(new_forward_connection, new_brick_interactor_idx);
     if (guided) {
-      query_results.AssignFreshWeights(new_forward_connection, cpoint);
+      query_results.AssignFreshWeights(new_forward_connection, *cpoint);
     };
     connections.MoveConnectionTo(new_backward_connection, new_neighbor_interactor_idx, internal_connections);
     substitute_available_connections.RemoveConnection(new_forward_connection, new_brick_interactor_idx);
@@ -4178,15 +4137,14 @@ bool ReconstructedMol::Crossover(const std::string & location, ConnectionQueryRe
   };
 
   // Update the rest of the ReconstructedMol's attributes.
-  level += (substitute.level - substituted->level);
-  if (increase_rings) {
-    n_ring_atoms += substitute.level;
-  } else if (decrease_rings) {
-    n_ring_atoms -= substituted->level;
+  if (decision == 1) {
+    n_ring_atoms += substitute.GetSize();
+  } else if (decision == -1) {
+    n_ring_atoms -= substituted->GetSize();
   } else {
     if (substitute.has_ring || substituted->has_ring) {
       assert(substitute.has_ring && substituted->has_ring);
-      n_ring_atoms += (substitute.level - substituted->level);
+      n_ring_atoms += (substitute.GetSize() - substituted->GetSize());
     };
   };
   max_atom_idx = substitute.max_atom_idx;
@@ -4204,6 +4162,9 @@ bool ReconstructedMol::Crossover(const std::string & location, ConnectionQueryRe
   if (update_stereo) {
     AssignUnspecifiedStereochemistry(prng);
   };
+
+  // Verify that the Connection compatibility rules are respected.
+  assert(ObeysConnectionCompatibilityRules(query_results.GetConnectionCompatibilities()));
 
   // Signal function success.
   return true;
@@ -4373,7 +4334,7 @@ bool ReconstructedMol::Translation(ConnectionQueryResults& query_results, std::m
 
       // Select random ConnectionPoints for the Maximum Bipartite Matching solution.
       new_forward_connection = *match.second;
-      new_backward_connection = neighbor_available_connections.GetRandomCompatibleConnection(new_forward_connection, query_results.compatibilities, prng);
+      new_backward_connection = query_results.compatibilities.GetRandomCompatibleConnection(neighbor_available_connections, new_forward_connection, prng);
 
       const CONNECTION_POINT_VECTOR& core_cpoint_vector = core_available_connections[new_forward_connection];
       unsigned n_connections = core_cpoint_vector.size();
@@ -4452,7 +4413,7 @@ bool ReconstructedMol::Translation(ConnectionQueryResults& query_results, std::m
   std::vector<const Connection*> peripheral_points;
   peripheral_points.reserve(connections.n_connection_points);
   for (const auto& c : connections) {
-    if (brick->connections.IsCompatibleWith(c.first, query_results.compatibilities)) {
+    if (query_results.compatibilities.AreCompatible(brick->connections, c.first)) {
       for (const ConnectionPoint& cpoint : c.second) {
         peripheral_points.push_back(&c.first);
       };
@@ -4507,7 +4468,7 @@ bool ReconstructedMol::Translation(ConnectionQueryResults& query_results, std::m
     };
     unsigned immutable_reconstruction_interactor_idx = reconstruction_cpoint_vector[connection_idx].atom_idx;
 
-    Connection compatible_connection = brick->connections.GetRandomCompatibleConnection(chosen_connection, query_results.compatibilities, prng);
+    Connection compatible_connection = query_results.compatibilities.GetRandomCompatibleConnection(brick->connections, chosen_connection, prng);
     const CONNECTION_POINT_VECTOR& brick_cpoint_vector = brick->connections[compatible_connection];
     n_connections = brick_cpoint_vector.size();
     connection_idx = 0;
@@ -4623,7 +4584,7 @@ bool ReconstructedMol::Translation(ConnectionQueryResults& query_results, std::m
 
       // Add the Connections between the MolBrick insert and the neighboring MolBrick.
       new_forward_connection = *matching[neighbor];
-      new_backward_connection = neighbor_available_connections.GetRandomCompatibleConnection(new_forward_connection, query_results.compatibilities, prng);
+      new_backward_connection = query_results.compatibilities.GetRandomCompatibleConnection(neighbor_available_connections, new_forward_connection, prng);
 
       const CONNECTION_POINT_VECTOR& brick_cpoint_vector = brick_available_connections[new_forward_connection];
       unsigned n_connections = brick_cpoint_vector.size();
@@ -4655,7 +4616,7 @@ bool ReconstructedMol::Translation(ConnectionQueryResults& query_results, std::m
 
       ConnectionPoint* cpoint = internal_connections.AddConnection(new_forward_connection, brick_interactor_idx);
       if (guided) {
-        query_results.AssignFreshWeights(new_forward_connection, cpoint);
+        query_results.AssignFreshWeights(new_forward_connection, *cpoint);
       };
       brick_available_connections.RemoveConnection(new_forward_connection, brick_interactor_idx);
       connections.MoveConnectionTo(new_backward_connection, new_neighbor_interactor_idx, internal_connections);
@@ -4694,7 +4655,7 @@ bool ReconstructedMol::Translation(ConnectionQueryResults& query_results, std::m
     // updating the ReconstructionsSchematic is necessary. Updating the owner
     // last is important to free up Connections first.
     new_forward_connection = *matching[owner];
-    new_backward_connection = owner_available_connections.GetRandomCompatibleConnection(new_forward_connection, query_results.compatibilities, prng);
+    new_backward_connection = query_results.compatibilities.GetRandomCompatibleConnection(owner_available_connections, new_forward_connection, prng);
 
     const CONNECTION_POINT_VECTOR& brick_cpoint_vector = brick_available_connections[new_forward_connection];
     unsigned n_connections = brick_cpoint_vector.size();
@@ -4726,7 +4687,7 @@ bool ReconstructedMol::Translation(ConnectionQueryResults& query_results, std::m
 
     ConnectionPoint* cpoint = internal_connections.AddConnection(new_forward_connection, brick_interactor_idx);
     if (guided) {
-      query_results.AssignFreshWeights(new_forward_connection, cpoint);
+      query_results.AssignFreshWeights(new_forward_connection, *cpoint);
     };
     brick_available_connections.RemoveConnection(new_forward_connection, brick_interactor_idx);
     connections.MoveConnectionTo(new_backward_connection, owner_interactor_idx, internal_connections);
@@ -4786,6 +4747,9 @@ bool ReconstructedMol::Translation(ConnectionQueryResults& query_results, std::m
     assert(AllConnectionsHaveWeights());
   };
 
+  // Verify that the Connection compatibility rules are respected.
+  assert(ObeysConnectionCompatibilityRules(query_results.GetConnectionCompatibilities()));
+
   // Signal function success.
   return true;
 };
@@ -4844,7 +4808,7 @@ bool ReconstructedMol::StereoFlip(std::mt19937& prng) {
   return true;
 };
 
-bool ReconstructedMol::Evolve(ReconstructionSettings& settings, sqlite3_stmt* select_statement, ConnectionQueryResults& query_results, SizeController& controller, std::mt19937& prng, ReconstructionsInventory& inventory, EvolutionReport& report, unsigned n_failures) {
+bool ReconstructedMol::Evolve(ReconstructionSettings& settings, const PseudofragmentDB& database, ConnectionQueryResults& query_results, SizeController& controller, std::mt19937& prng, ReconstructionsInventory& inventory, EvolutionReport& report, unsigned n_failures) {
   // Determine which operations are possible. Checking whether a peripheral
   // deletion or expansion is possible is trivial and should be done. The
   // others I can afford to let fail.
@@ -4859,21 +4823,21 @@ bool ReconstructedMol::Evolve(ReconstructionSettings& settings, sqlite3_stmt* se
 
   bool success = false;
   if (operation == "peripheral_expansion") {
-    success = PeripheralExpansion(select_statement, query_results, controller, prng, settings.UsingGuidedEvolution(), settings.AssignUnspecifiedStereo());
+    success = PeripheralExpansion(database, query_results, controller, prng, settings.UsingGuidedEvolution(), settings.AssignUnspecifiedStereo());
   } else if (operation == "internal_expansion") {
-    success = InternalExpansion(select_statement, query_results, controller, prng, settings.UsingGuidedEvolution(), settings.AssignUnspecifiedStereo());
+    success = InternalExpansion(database, query_results, controller, prng, settings.UsingGuidedEvolution(), settings.AssignUnspecifiedStereo());
   } else if (operation == "peripheral_deletion") {
     success = PeripheralDeletion(controller, prng, settings.UsingGuidedEvolution(), settings.AssignUnspecifiedStereo());
   } else if (operation == "internal_deletion") {
     success = InternalDeletion(query_results, controller, prng, settings.UsingGuidedEvolution(), settings.AssignUnspecifiedStereo());
   } else if (operation == "peripheral_substitution") {
-    success = Substitution("peripheral", select_statement, query_results, controller, prng, settings.UsingGuidedEvolution(), settings.AssignUnspecifiedStereo());
+    success = Substitution("peripheral", database, query_results, controller, prng, settings.UsingGuidedEvolution(), settings.AssignUnspecifiedStereo());
   } else if (operation == "internal_substitution") {
-    success = Substitution("internal", select_statement, query_results, controller, prng, settings.UsingGuidedEvolution(), settings.AssignUnspecifiedStereo());
-  } else if (operation == "peripheral_crossover") {
-    success = Crossover("peripheral", query_results, controller, prng, inventory, settings.UsingGuidedEvolution(), settings.AssignUnspecifiedStereo());
-  } else if (operation == "internal_crossover") {
-    success = Crossover("peripheral", query_results, controller, prng, inventory, settings.UsingGuidedEvolution(), settings.AssignUnspecifiedStereo());
+    success = Substitution("internal", database, query_results, controller, prng, settings.UsingGuidedEvolution(), settings.AssignUnspecifiedStereo());
+  } else if (operation == "peripheral_transfection") {
+    success = Transfection("peripheral", query_results, controller, prng, inventory, settings.UsingGuidedEvolution(), settings.AssignUnspecifiedStereo());
+  } else if (operation == "internal_transfection") {
+    success = Transfection("peripheral", query_results, controller, prng, inventory, settings.UsingGuidedEvolution(), settings.AssignUnspecifiedStereo());
   } else if (operation == "translation") {
     success = Translation(query_results, prng, settings.UsingGuidedEvolution(), settings.AssignUnspecifiedStereo());
   } else if (operation == "stereo_flip") {
@@ -4881,115 +4845,19 @@ bool ReconstructedMol::Evolve(ReconstructionSettings& settings, sqlite3_stmt* se
   };
 
   if (success) {
-    // std::cout << "Operation succeeded!\n";
+    // std::cout << operation << " succeeded!" << std::endl;
     ++report.success_frequencies.at(operation);
   } else {
     inventory.ClearQueues();
     ++n_failures;
-    // std::cout << "Operation " << operation << " failed! Retrying..." << std::endl;
+    // std::cout << operation << " failed! Retrying..." << std::endl;
     if (n_failures >= settings.GetMaxAttemptsPerGeneration()) {
       return false;
     };
-    success = Evolve(settings, select_statement, query_results, controller, prng, inventory, report, n_failures);
+    success = Evolve(settings, database, query_results, controller, prng, inventory, report, n_failures);
   };
 
   return success;
-};
-
-void ReconstructedMol::AddLabelledPseudofragment(const Pseudofragment& pseudofragment) {
-  // Determine which schematic index to use for the new MolBrick.
-  unsigned brick_schematic_idx;
-  if (available_schematic_idxs.empty()) {
-    schematic.Expand();
-    if (bricks.empty()) {
-      brick_schematic_idx = 0u;
-    } else {
-      brick_schematic_idx = ++max_schematic_idx;
-    };
-  } else {
-    brick_schematic_idx = available_schematic_idxs.back();
-    available_schematic_idxs.pop_back();
-  };
-
-  // Construct the new MolBrick.
-  MolBrick brick(pseudofragment, 0u, brick_schematic_idx, 1.0f, this);
-
-  // Initialize iterators to check if a given Atom pertains to the new MolBrick.
-  std::vector<unsigned>::const_iterator new_brick_it, new_brick_begin_it = brick.atom_indices.begin(), new_brick_end_it = brick.atom_indices.end();
-
-  // Check which MolBricks of the ReconstructedMol neighbor the new MolBrick and
-  // record the Connections between them.
-  // Loop over the Atoms in the MolBrick.
-  for (const RDKit::Atom* brick_atom : brick.pseudomol.atoms()) {
-    // Get the corresponding Atom in the ReconstructedMol.
-    unsigned immutable_atom_idx = brick_atom->getProp<unsigned>("ImmutableIdx");
-    unsigned atom_type = brick_atom->getProp<unsigned>("MMFF_atom_type");
-    const RDKit::Atom* reconstruction_atom = GetAtomWithImmutableIdx(pseudomol, immutable_atom_idx);
-    // Loop over the neighboring atoms.
-    RDKit::ROMol::ADJ_ITER nbr_it, nbr_end_it;
-    std::tie(nbr_it, nbr_end_it) = pseudomol.getAtomNeighbors(reconstruction_atom);
-    while (nbr_it != nbr_end_it) {
-      unsigned neighbor_atom_idx = *nbr_it;
-      const RDKit::Atom* neighbor_atom = pseudomol.getAtomWithIdx(neighbor_atom_idx);
-      unsigned immutable_neighbor_atom_idx = neighbor_atom->getProp<unsigned>("ImmutableIdx");
-      // If the neighboring atom isn't part of the same MolBrick, check to which
-      // neighbor it pertains.
-      new_brick_it = std::find(new_brick_begin_it, new_brick_end_it, immutable_neighbor_atom_idx);
-      if (new_brick_it == new_brick_end_it) {
-        // Iterate over the MolBricks in the ReconstructedMol.
-        for (const auto& b : bricks) {
-          unsigned neighbor_brick_schematic_idx = b.first;
-          const MolBrick& neighbor_brick = b.second;
-          // If the MolBrick contains the atom in question record it as a neighbor.
-          std::vector<unsigned>::const_iterator it, end_it = neighbor_brick.atom_indices.end();
-          it = std::find(neighbor_brick.atom_indices.begin(), end_it, immutable_neighbor_atom_idx);
-          if (it != end_it) {
-            // Retrieve the necessary attributes of the neighboring Atom to
-            // update the ReconstructedMol.
-            unsigned neighbor_atom_type = neighbor_atom->getProp<unsigned>("MMFF_atom_type");
-            const RDKit::Bond* bond = pseudomol.getBondBetweenAtoms(reconstruction_atom->getIdx(), neighbor_atom_idx);
-            unsigned bond_type_int = bond_type_int_table[bond->getBondType()];
-            Connection connection (atom_type, neighbor_atom_type, bond_type_int);
-            // Update the ReconstructionSchematic.
-            schematic.adjacency[brick_schematic_idx][neighbor_brick_schematic_idx] = 1u;
-            schematic.adjacency[neighbor_brick_schematic_idx][brick_schematic_idx] = 1u;
-            schematic.start_atom_idx[brick_schematic_idx][neighbor_brick_schematic_idx] = immutable_atom_idx;
-            schematic.start_atom_idx[neighbor_brick_schematic_idx][brick_schematic_idx] = immutable_neighbor_atom_idx;
-            schematic.end_atom_idx[brick_schematic_idx][neighbor_brick_schematic_idx] = immutable_neighbor_atom_idx;
-            schematic.end_atom_idx[neighbor_brick_schematic_idx][brick_schematic_idx] = immutable_atom_idx;
-            schematic.start_atom_type[brick_schematic_idx][neighbor_brick_schematic_idx] = atom_type;
-            schematic.start_atom_type[neighbor_brick_schematic_idx][brick_schematic_idx] = neighbor_atom_type;
-            schematic.end_atom_type[brick_schematic_idx][neighbor_brick_schematic_idx] = neighbor_atom_type;
-            schematic.end_atom_type[neighbor_brick_schematic_idx][brick_schematic_idx] = atom_type;
-            schematic.bond_type[brick_schematic_idx][neighbor_brick_schematic_idx] = bond_type_int;
-            schematic.bond_type[neighbor_brick_schematic_idx][brick_schematic_idx] = bond_type_int;
-            // Update the ReconstructedMol's ConnectionsTables.
-            internal_connections.AddConnection(connection, immutable_atom_idx);
-            internal_connections.AddConnection(connection.Mirror(), immutable_neighbor_atom_idx);
-            break;
-          };
-        };
-      };
-      ++nbr_it;
-    };
-  };
-
-  // Update the rest of the ReconstructedMol's attributes.
-  level += brick.level;
-  if (brick.has_ring) {
-    n_ring_atoms += brick.level;
-  };
-  if (brick.max_atom_idx > max_atom_idx) {
-    max_atom_idx = brick.max_atom_idx;
-  };
-  sanitized_mol_updated = false;
-  smiles_updated = false;
-  sanitized_smiles_updated = false;
-  fingerprint_updated = false;
-  stereo_updated = false;
-
-  // Store the new MolBrick.
-  bricks.insert({brick_schematic_idx, std::move(brick)});
 };
 
 void ReconstructedMol::SetID(unsigned new_id) {
@@ -5017,7 +4885,24 @@ std::pair<Connection, bool> ReconstructedMol::HasKnownConnections(const Connecti
   return std::make_pair(Connection(), true);
 };
 
-void ReconstructedMol::AssignWeightsToConnections(ConnectionQueryResults & query_results) {
+bool ReconstructedMol::ObeysConnectionCompatibilityRules(const ConnectionCompatibilities& compatibilities) const {
+  for (size_t row_idx = 0; row_idx < schematic.GetDimension(); ++row_idx) {
+    for (size_t column_idx = 0; column_idx < schematic.GetDimension(); ++column_idx) {
+      bool adjacent_bricks = schematic.adjacency[row_idx][column_idx];
+      if (adjacent_bricks) {
+        Connection forward_connection (schematic.start_atom_type[row_idx][column_idx], schematic.end_atom_type[row_idx][column_idx], schematic.bond_type[row_idx][column_idx]);
+        Connection backward_connection (schematic.start_atom_type[column_idx][row_idx], schematic.end_atom_type[column_idx][row_idx], schematic.bond_type[column_idx][row_idx]);
+        bool connections_are_compatible = compatibilities.AreCompatible(forward_connection, backward_connection);
+        if (!connections_are_compatible) {
+          return false;
+        };
+      };
+    };
+  };
+  return true;
+};
+
+void ReconstructedMol::AssignWeightsToConnections(ConnectionQueryResults& query_results) {
   for (auto& c : connections) {
     query_results.AssignFreshWeights(c.first, c.second);
   };
@@ -5066,78 +4951,8 @@ void ReconstructedMol::Sanitize() {
   if (sanitized_mol_updated) {
     return;
   };
-  try {
-    // Reset the sanitized molecule as a copy of the unsanitized pseudomol.
-    sanitized_mol = pseudomol;
-    // Add explicit hydrogens to replace the molecule's pseudoatoms.
-    // (i.e. saturate the ReconstructedMol's Connections with hydrogens).
-    for (const auto& c : connections) {
-      const Connection& connection = c.first;
-      const std::vector<ConnectionPoint>& cpoints = c.second;
-      unsigned bond_order = connection.bond_type;
-      assert(bond_order == 1 || bond_order == 2 || bond_order == 3);
-      for (const ConnectionPoint& cpoint : cpoints) {
-        RDKit::Atom* atom = GetAtomWithImmutableIdx(sanitized_mol, cpoint.atom_idx);
-        atom->setNumExplicitHs(atom->getNumExplicitHs() + bond_order);
-      };
-    };
-    // Loop over the molecule in search of Sulfur and Phosphorus atoms and adjust
-    // their number of explicit hydrogens to match their lowest possible valence.
-    // NOTE: If working with other elements for which simple hydrogen saturation
-    // isn't guaranteed to yield a legal chemotype this section ought to be expanded.
-    for (RDKit::RWMol::AtomIterator ai = sanitized_mol.beginAtoms(); ai != sanitized_mol.endAtoms(); ++ai) {
-      // If the atom is a phosphorus:
-      if ((*ai)->getAtomicNum() == 15) {
-        // Calculate the "heavy atom valence" as the number of bonds involved in
-        // bonding to heavy atoms.
-        unsigned valence = (*ai)->getTotalValence();
-        unsigned n_hydrogens = (*ai)->getTotalNumHs();
-        unsigned heavy_atom_valence = valence - n_hydrogens;
-        // assert(valence >= 0 && valence <= 5);
-        assert(valence >= 0 && valence <= 6);
-        if (valence == 3 || valence == 5) {
-          // If this valence is 0 (i.e. the phosphorus is detached) convert it to phosphine.
-          if (heavy_atom_valence == 0) {
-            (*ai)->setNumExplicitHs(3);
-          // If the valence is odd it's already valid and the excess hydrogens are removed.
-          } else if (heavy_atom_valence % 2) {
-            (*ai)->setNumExplicitHs(0);
-          // If the valence is even push it up to the nearest odd valence.
-          } else {
-            (*ai)->setNumExplicitHs(1);
-          };
-        };
-      // If the atom is a sulfur:
-      } else if ((*ai)->getAtomicNum() == 16) {
-        // Calculate the "heavy atom valence" as the number of bonds involved in
-        // bonding to heavy atoms.
-        unsigned valence = (*ai)->getTotalValence();
-        unsigned n_hydrogens = (*ai)->getTotalNumHs();
-        unsigned heavy_atom_valence = valence - n_hydrogens;
-        assert(valence >= 0 && valence <= 6);
-        if (valence == 2 || valence == 4 || valence == 6) {
-          // If this valence is 0 (i.e. the sulfur is detached) convert it to hydrogen sulfide.
-          if (heavy_atom_valence == 0) {
-            (*ai)->setNumExplicitHs(2);
-          // If the valence is odd push it up to the nearest even valence.
-          } else if (heavy_atom_valence % 2) {
-            (*ai)->setNumExplicitHs(1);
-          // If the valence is even it's already valid and the excess hydrogens are removed.
-          } else {
-            (*ai)->setNumExplicitHs(0);
-          };
-        };
-      };
-    };
-    // Wrap up the molecule sanitization and remove the hydrogens.
-    // This is important since explicit hydrogens affect the fingerprint.
-    RDKit::MolOps::sanitizeMol(sanitized_mol);
-    RDKit::MolOps::removeHs(sanitized_mol);
-    sanitized_mol_updated = true;
-  } catch (const std::exception& e) {
-    std::cout << "ERROR: Sanitization failed for ReconstructedMol " << id << ": " << GetSMILES() << std::endl;
-    throw;
-  };
+  sanitized_mol = SanitizePseudomol(pseudomol, connections, true);
+  sanitized_mol_updated = true;
 };
 
 void ReconstructedMol::AssignUnspecifiedStereochemistry(std::mt19937& prng) {
@@ -5217,24 +5032,11 @@ void ReconstructedMol::AssignUnspecifiedStereochemistry(std::mt19937& prng) {
   stereo_updated = true;
 };
 
-void ReconstructedMol::GenerateSMILES() {
+void ReconstructedMol::GenerateConnectionEncodingSMILES() {
   if (smiles_updated) {
     return;
   };
-  RDKit::RWMol dummymol(pseudomol);
-  RDKit::Bond::BondType bond_type;
-  RDKit::Atom pseudoatom(0);
-  unsigned start_atom_idx, pseudoatom_idx;
-  for (const auto& c : connections) {
-    bond_type = int_bond_type_table[c.first.bond_type];
-    pseudoatom.setIsotope(c.first.encoded);
-    for (const ConnectionPoint& cpoint : c.second) {
-      start_atom_idx = GetMutableAtomIdx(dummymol, cpoint.atom_idx);
-      pseudoatom_idx = dummymol.addAtom(&pseudoatom);
-      dummymol.addBond(start_atom_idx, pseudoatom_idx, bond_type);
-    };
-  };
-  smiles = RDKit::MolToSmiles(dummymol);
+  smiles = MakePseudomolSMILES(pseudomol, connections);
   smiles_updated = true;
 };
 
@@ -5254,7 +5056,7 @@ void ReconstructedMol::GenerateFingerprint() {
   Sanitize();
   // WARNING: At the time of writing (RDKit version 2020.09.4) the
   // RDKit::SparseIntVect copy constructor  and assignment operators were bugged.
-  // By the time LEADD is released this  should be fixed, but beware if you are
+  // By the time LEADD is released this should be fixed, but beware if you are
   // using older versions of the RDKit.
   const RDKit::SparseIntVect<std::uint32_t>* tmp = RDKit::MorganFingerprints::getFingerprint(sanitized_mol, 2);
   fingerprint = *tmp;
@@ -5269,18 +5071,14 @@ float ReconstructedMol::Score(const RDKit::SparseIntVect<std::uint32_t>* referen
   return score;
 };
 
-unsigned ReconstructedMol::GetID() const {
-  return id;
-};
-
 double ReconstructedMol::GetSimilarity(ReconstructedMol& reconstruction) {
   GenerateFingerprint();
   reconstruction.GenerateFingerprint();
   return RDKit::TanimotoSimilarity(fingerprint, reconstruction.fingerprint);
 };
 
-bool ReconstructedMol::StereoIsUpdated() const {
-  return stereo_updated;
+unsigned ReconstructedMol::GetID() const {
+  return id;
 };
 
 const RDKit::RWMol& ReconstructedMol::GetPseudomol() const {
@@ -5312,8 +5110,8 @@ unsigned ReconstructedMol::GetNBricks() const {
   return bricks.size();
 };
 
-unsigned ReconstructedMol::GetLevel() const {
-  return level;
+unsigned ReconstructedMol::GetSize() const {
+  return pseudomol.getNumAtoms();
 };
 
 unsigned ReconstructedMol::GetNRingAtoms() const {
@@ -5332,8 +5130,8 @@ float ReconstructedMol::GetScore() const {
   return score;
 };
 
-const std::string& ReconstructedMol::GetSMILES() {
-  GenerateSMILES();
+const std::string& ReconstructedMol::GetConnectionEncodingSMILES() {
+  GenerateConnectionEncodingSMILES();
   return smiles;
 };
 
@@ -5345,6 +5143,10 @@ const std::string& ReconstructedMol::GetSanitizedSMILES() {
 const RDKit::SparseIntVect<std::uint32_t>& ReconstructedMol::GetFingerprint() {
   GenerateFingerprint();
   return fingerprint;
+};
+
+bool ReconstructedMol::StereoIsUpdated() const {
+  return stereo_updated;
 };
 
 bool ReconstructedMol::IsChild() const {
@@ -5371,7 +5173,7 @@ void ReconstructedMol::Draw(const std::string& file_path) {
 
 // Class EvolutionGuide
 EvolutionGuide::EvolutionGuide() = default;
-EvolutionGuide::EvolutionGuide(sqlite3* database, const ReconstructionSettings& settings) {
+EvolutionGuide::EvolutionGuide(const PseudofragmentDB& database, const ReconstructionSettings& settings) {
   // Set the learning reinforcements and similarity thresholds.
   acyclic_threshold = settings.GetAcyclicLearningSimilarityThreshold();
   ring_threshold = settings.GetRingLearningSimilarityThreshold();
@@ -5385,7 +5187,7 @@ EvolutionGuide::EvolutionGuide(sqlite3* database, const ReconstructionSettings& 
   assert(ring_positive_reinforcement >= 0.0f);
   assert(ring_negative_reinforcement >= 0.0f && ring_negative_reinforcement <= 1.0f);
   // Count the number of Pseudofragments in the database.
-  unsigned n_fragments = GetPseudofragmentCount(database);
+  sqlite3_int64 n_pseudofragments = database.GetNPseudofragments();
   // Set up the necessary handles to work with the HDF5 similarity file.
   simatrix_file = H5::H5File(settings.GetSimilarityMatrixFile(), H5F_ACC_RDONLY);
   simatrix_dataset = simatrix_file.openDataSet("simatrix");
@@ -5393,12 +5195,12 @@ EvolutionGuide::EvolutionGuide(sqlite3* database, const ReconstructionSettings& 
   float_type = simatrix_dataset.getFloatType();
   // Configure the size of the selection hyperslab.
   hyperslab_size[0] = 1;
-  hyperslab_size[1] = n_fragments;
+  hyperslab_size[1] = n_pseudofragments;
   // Set up buffers to store an entire row of read values from the HDF5 file.
-  buffer1 = new float[n_fragments];
-  buffer2 = new float[n_fragments];
-  buffer3 = new float[n_fragments];
-  buffer_size[0] = n_fragments;
+  buffer1 = new float[n_pseudofragments];
+  buffer2 = new float[n_pseudofragments];
+  buffer3 = new float[n_pseudofragments];
+  buffer_size[0] = n_pseudofragments;
   buffer_dataspace = H5::DataSpace(1, buffer_size);
 };
 
@@ -5580,85 +5382,4 @@ void EvolutionGuide::Cleanup() {
   delete buffer1;
   delete buffer2;
   delete buffer3;
-};
-
-
-// Standalone function to retrieve a pointer to the Atom with the specified immutable index.
-RDKit::Atom* GetAtomWithImmutableIdx(RDKit::RWMol& pseudomol, unsigned immutable_atom_idx) {
-  for (RDKit::RWMol::AtomIterator ai = pseudomol.beginAtoms(); ai != pseudomol.endAtoms(); ++ai) {
-    if ((*ai)->getProp<unsigned>("ImmutableIdx") == immutable_atom_idx) {
-      return *ai;
-    };
-  };
-  throw std::runtime_error("Atom retrieval failed.\n");
-};
-
-// Standalone functions to convert pseudomol immutable atom indices into their mutable counterparts.
-unsigned GetMutableAtomIdx(const RDKit::RWMol & pseudomol, unsigned immutable_atom_idx) {
-  for (RDKit::ROMol::ConstAtomIterator ai = pseudomol.beginAtoms(); ai != pseudomol.endAtoms(); ++ai) {
-    if ((*ai)->getProp<unsigned>("ImmutableIdx") == immutable_atom_idx) {
-      return (*ai)->getIdx();
-    };
-  };
-  throw std::runtime_error("Atom idx retrieval failed.\n");
-};
-
-std::vector<unsigned> GetMutableAtomIndices(const RDKit::RWMol & pseudomol, const std::vector<unsigned> & immutable_atom_indices) {
-  std::vector<unsigned> mutable_atom_indices;
-  mutable_atom_indices.reserve(immutable_atom_indices.size());
-  std::vector<unsigned>::const_iterator it, begin_it = immutable_atom_indices.begin(), end_it = immutable_atom_indices.end();
-  unsigned immutable_atom_idx;
-  for (RDKit::ROMol::ConstAtomIterator ai = pseudomol.beginAtoms(); ai != pseudomol.endAtoms(); ++ai) {
-    immutable_atom_idx = (*ai)->getProp<unsigned>("ImmutableIdx");
-    it = begin_it;
-    while ((it = std::find(it, end_it, immutable_atom_idx)) != end_it) {
-      mutable_atom_indices.push_back((*ai)->getIdx());
-      ++it;
-    };
-  };
-  return mutable_atom_indices;
-};
-
-ReconstructedMol ConvertToReconstructedMol(const RDKit::ROMol& mol, bool fragment_rings, bool names_as_scores, boost::format& formatter) {
-  // Initialize an empty ReconstructedMol.
-  ReconstructedMol reconstruction;
-  // Set its molecule objects to the input RDKit::ROMol.
-  reconstruction.pseudomol = mol;
-  FlagAtoms(reconstruction.pseudomol);
-  reconstruction.sanitized_mol = reconstruction.pseudomol;
-  // If the ring systems ought to be fragmented:
-  if (fragment_rings) {
-    // Loop over the atoms in the molecule, convert them into Pseudofragments
-    // and add them to the ReconstructedMol as MolBricks.
-    for (const RDKit::Atom* atom : reconstruction.pseudomol.atoms()) {
-      Pseudofragment pseudofragment = AtomToPseudofragment(reconstruction.pseudomol, atom, formatter);
-      reconstruction.AddLabelledPseudofragment(pseudofragment);
-    };
-  // If ring systems should be treated as separate Pseudofragments.
-  } else {
-    // Separate the molecule into acyclic and cyclic fragments.
-    std::vector<RDKit::ROMOL_SPTR> acyclic_fragments, ring_fragments;
-    std::tie(acyclic_fragments, ring_fragments) = SplitAtRings(reconstruction.pseudomol);
-    // Convert the cyclic fragments into Pseudofragments and add them to the
-    // ReconstructedMol as MolBricks.
-    for (RDKit::ROMOL_SPTR ring_fragment : ring_fragments) {
-      Pseudofragment pseudofragment = DummyMolToPseudofragment(*ring_fragment, formatter);
-      reconstruction.AddLabelledPseudofragment(pseudofragment);
-    };
-    // Loop over the acyclic atoms in the molecule, convert them into Pseudofragments
-    // and add them to the ReconstructedMol as MolBricks.
-    for (const RDKit::Atom* atom : reconstruction.pseudomol.atoms()) {
-      if (!atom->getProp<bool>("WasInRing")) {
-        Pseudofragment pseudofragment = AtomToPseudofragment(reconstruction.pseudomol, atom, formatter);
-        reconstruction.AddLabelledPseudofragment(pseudofragment);
-      };
-    };
-  };
-  // If required, use the molecule's original name as its score.
-  if (names_as_scores) {
-    float score = std::stof(mol.getProp<std::string>("_Name"));
-    reconstruction.SetScore(score);
-  };
-
-  return reconstruction;
 };
