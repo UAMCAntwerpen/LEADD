@@ -45,7 +45,7 @@ ConnectionCompatibilities::ConnectionCompatibilities(const PseudofragmentDB& dat
     // Define the compatibility table.
     for (const auto& [bond_type, connections] : connections_with_bond_type) {
       for (const Connection& connection : connections) {
-        compatibility_table.emplace(std::piecewise_construct, std::forward_as_tuple(connection), std::forward_as_tuple(connections.begin(), connections.end()));
+        compatibility_table.insert({connection, CONNECTIONS_SET(connections.begin(), connections.end())});
         ++progress;
       };
     };

@@ -2233,7 +2233,7 @@ ReconstructedMol::ReconstructedMol(const RDKit::ROMol& molecule, const Fragmenta
   // Use the Pseudofragments to define the MolBricks.
   for (size_t brick_schematic_idx = 0; brick_schematic_idx < pseudofragments.size(); ++brick_schematic_idx) {
     const Pseudofragment& pseudofragment = pseudofragments[brick_schematic_idx];
-    auto [it, emplaced] = bricks.emplace(std::piecewise_construct, std::forward_as_tuple(brick_schematic_idx), std::forward_as_tuple(pseudofragment, 0, max_atom_idx + 1, brick_schematic_idx, 0, this));
+    auto [it, emplaced] = bricks.insert({brick_schematic_idx, MolBrick(pseudofragment, 0, max_atom_idx + 1, brick_schematic_idx, 0, this)});
     max_atom_idx = it->second.max_atom_idx;
     max_schematic_idx = brick_schematic_idx;
     if (pseudofragment.HasRing()) {
