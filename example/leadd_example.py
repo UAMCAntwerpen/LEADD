@@ -77,11 +77,13 @@ def Main():
     best_individual = leadd.GetBestIndividual()
     print(f"Best individual: {best_individual.GetSanitizedSMILES()}, Score: {best_individual.GetScore():.4f}")
 
-    # Write out the designed molecules.
-    output_molecules_path = os.path.join(args.output, "designed_molecules.smi")
-    with open(output_molecules_path, "w") as file:
+    # Write out the designed molecules in SMILES and binary format.
+    output_smiles_path = os.path.join(args.output, "population.smi")
+    with open(output_smiles_path, "w") as file:
         for molecule in leadd.GetPopulation():
             file.write(f"{molecule.GetSanitizedSMILES()} {molecule.GetScore()}\n")
+    output_population_path = os.path.join(args.output, "population.rst")
+    leadd.SavePopulation(output_population_path)
 
     # Release LEADD's resources.
     leadd.Cleanup()

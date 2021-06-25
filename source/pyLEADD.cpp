@@ -67,10 +67,13 @@ PYBIND11_MODULE(pyLEADD, module) {
     .def("WriteOperationFrequenciesToReport", &LEADD::WriteOperationFrequenciesToReport)
     .def("SetPopulation", &LEADD::SetPopulation,
          pybind11::arg("population"), pybind11::arg("reset_weights") = true)
+    .def("SavePopulation",
+         pybind11::overload_cast<const std::string&>(&LEADD::SavePopulation, pybind11::const_),
+         pybind11::arg("output_file_path"))
     .def("GetPopulation", &LEADD::GetPopulation,
          pybind11::return_value_policy::reference_internal)
     .def("GetBestIndividual", &LEADD::GetBestIndividual,
-        pybind11::return_value_policy::reference_internal)
+         pybind11::return_value_policy::reference_internal)
     .def("GetGenerationNumber", &LEADD::GetGenerationNumber)
     .def("GetBestScore", &LEADD::GetBestScore)
     .def("GetSettings", &LEADD::GetSettings)

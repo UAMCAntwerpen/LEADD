@@ -52,6 +52,7 @@ public:
   void SetPopulation(const std::list<ReconstructedMol>& new_population, bool reset_weights = true);
   void LoadPopulation();
   void SavePopulation() const;
+  void SavePopulation(const std::string& file_path) const;
   void WritePopulationSMILES(const std::string& file_path);
 
   unsigned GenerateChildren();

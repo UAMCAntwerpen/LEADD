@@ -17,13 +17,14 @@ import pyLEADD
 
 class LEADD(GoalDirectedGenerator):
     def __init__(self, fragmentation_settings_file, reconstruction_settings_file, output_directory, starting_population=None, benchmark=None, n_threads=1):
+        self.output_directory = output_directory
         self.pool = joblib.Parallel(n_jobs=n_threads)
         self.starting_population = starting_population
         self.fragmentation_settings = pyLEADD.FragmentationSettings(fragmentation_settings_file)
         self.reconstruction_settings = pyLEADD.ReconstructionSettings(reconstruction_settings_file)
         if benchmark is not None:
             self.configure_goal_directed_benchmark(benchmark)
-        self.leadd = pyLEADD.LEADD(reconstruction_settings=self.reconstruction_settings, output_directory_path=output_directory)
+        self.leadd = pyLEADD.LEADD(reconstruction_settings=self.reconstruction_settings, output_directory_path=self.output_directory)
         self.n_generations = 0
         self.n_scored_molecules = 0
         self.time_spend_designing = 0
@@ -157,6 +158,9 @@ class LEADD(GoalDirectedGenerator):
             self.leadd.SelectivePressure()
             self.time_spend_designing += time.time() - start
         self.n_generations += self.leadd.GetGenerationNumber()
+
+        # Store the serialized population.
+        self.leadd.SavePopulation(os.path.join(self.output_directory, "population.rst"))
 
         # Pass on the final designed molecules to the benchmark suite for analysis.
         final_population_smiles = [individual.GetSanitizedSMILES() for individual in self.leadd.GetPopulation()]

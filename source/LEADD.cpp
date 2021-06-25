@@ -206,7 +206,11 @@ void LEADD::LoadPopulation() {
 };
 
 void LEADD::SavePopulation() const {
-  std::ofstream output_stream(settings.GetRestartOutputFile(), std::ofstream::binary);
+  SavePopulation(settings.GetRestartOutputFile());
+};
+
+void LEADD::SavePopulation(const std::string& file_path) const {
+  std::ofstream output_stream(file_path, std::ofstream::binary);
   boost::archive::binary_oarchive archive(output_stream);
   archive << population;
   output_stream.close();

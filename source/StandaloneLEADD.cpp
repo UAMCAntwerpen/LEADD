@@ -89,14 +89,13 @@ int main(int argc, const char* argv[]) {
 
   // Write out the SMILES of the all individuals within the population alongside
   // their corresponding scores in the second column.
-  std::filesystem::path output_molecules_path (output_directory);
-  output_molecules_path.append("designed_molecules.smi");
-  leadd.WritePopulationSMILES(output_molecules_path);
-
-  // If requested, save the final serialized population in a file.
-  if (settings.SaveProgress()) {
-    leadd.SavePopulation();
-  };
+  std::filesystem::path output_smiles_path (output_directory);
+  output_smiles_path.append("population.smi");
+  leadd.WritePopulationSMILES(output_smiles_path);
+  // Save the final serialized population in a file.
+  std::filesystem::path output_population_path (output_directory);
+  output_population_path.append("population.rst");
+  leadd.SavePopulation(output_population_path);
 
   // Close all open files.
   leadd.Cleanup();
