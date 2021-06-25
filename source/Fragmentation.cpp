@@ -504,9 +504,12 @@ std::vector<Pseudofragment> MakePseudofragments(RDKit::ROMol& molecule, const Fr
   AssignOldIdxAtomProperty(molecule);
 
   size_t n_cyclic_fragments = 0;
+  std::vector<bool> ring_part_fragment_mask;
   if (settings.FragmentRings()) {
     // If rings ought to be fragmented, fragment the entire molecule systematically.
     fragments = FragmentSystematically(molecule, settings, true);
+    // Identify the fragments that are parts of rings.
+    ring_part_fragment_mask = RingPartFragmentMask(molecule, fragments);
   } else {
     // Otherwise, first split the molecule into cyclic and acyclic parts.
     auto[cyclic_structures, acyclic_structures] = SplitAtRings(molecule, true);
@@ -518,10 +521,9 @@ std::vector<Pseudofragment> MakePseudofragments(RDKit::ROMol& molecule, const Fr
       std::vector<RDKit::ROMOL_SPTR> acyclic_fragments = FragmentSystematically(*acyclic_structure, settings, true);
       fragments.insert(fragments.end(), acyclic_fragments.begin(), acyclic_fragments.end());
     };
+    // If ring structures are treated as fragments, no fragment can be a ring part.
+    ring_part_fragment_mask.resize(fragments.size(), false);
   };
-
-  // Identify the fragments that are parts of rings.
-  std::vector<bool> ring_part_fragment_mask = RingPartFragmentMask(molecule, fragments);
 
   // Convert the fragments into Pseudofragment objects.
   std::vector<Pseudofragment> pseudofragments;
