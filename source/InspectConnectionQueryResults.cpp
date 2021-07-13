@@ -7,7 +7,7 @@
 int main(int argc, const char* argv[]) {
   // Set up a command line argument parser.
   std::string input;
-  bool verbose = false;
+  bool verbose = false, very_verbose = false;
   boost::program_options::options_description description("Options");
   description.add_options()
     ("help,h",
@@ -15,7 +15,9 @@ int main(int argc, const char* argv[]) {
     ("input,i", boost::program_options::value<std::string>(&input)->required(),
       "Path to a serialized ConnectionQueryResults object (.cqr file).")
     ("verbose,v", boost::program_options::bool_switch(&verbose)->default_value(false),
-      "Flag to print the ConnectionCompatibilities to standard output.");
+      "Flag to print the ConnectionCompatibilities to standard output.")
+    ("very_verbose,y", boost::program_options::bool_switch(&very_verbose)->default_value(false),
+      "Flag to print the ConnectionQueryResults to standard output.");
   boost::program_options::positional_options_description positionals_description;
   positionals_description.add("input", 1);
   boost::program_options::variables_map vm;
@@ -63,24 +65,16 @@ int main(int argc, const char* argv[]) {
   double average_n_compatible_fragments_strict = 0.0;
   double average_n_compatible_fragments_lax = 0.0;
   for (const auto& [connection, qrbn] : query_results.GetStrictAcyclicResults()) {
-    for (const auto& [n, qr] : qrbn) {
-      average_n_compatible_fragments_strict += qr.first.size();
-    };
+    average_n_compatible_fragments_strict += qrbn.at(1).first.size();
   };
   for (const auto& [connection, qrbn] : query_results.GetStrictRingResults()) {
-    for (const auto& [n, qr] : qrbn) {
-      average_n_compatible_fragments_strict += qr.first.size();
-    };
+    average_n_compatible_fragments_strict += qrbn.at(1).first.size();
   };
   for (const auto& [connection, qrbn] : query_results.GetAcyclicResults()) {
-    for (const auto& [n, qr] : qrbn) {
-      average_n_compatible_fragments_lax += qr.first.size();
-    };
+    average_n_compatible_fragments_lax += qrbn.at(1).first.size();
   };
   for (const auto& [connection, qrbn] : query_results.GetRingResults()) {
-    for (const auto& [n, qr] : qrbn) {
-      average_n_compatible_fragments_lax += qr.first.size();
-    };
+    average_n_compatible_fragments_lax += qrbn.at(1).first.size();
   };
   average_n_compatible_fragments_strict /= n_connections;
   average_n_compatible_fragments_lax /= n_connections;
@@ -93,6 +87,14 @@ int main(int argc, const char* argv[]) {
   // If requested, print the ConnectionCompatibilities to the standard output.
   if (verbose) {
     compatibilities.Print();
+  };
+
+  // If requested, print the ConnectionQueryResults to the standard output.
+  if (very_verbose) {
+    std::cout << "Strict ConnectionQueryResults" << std::endl;
+    query_results.PrintStrict();
+    std::cout << "Lax ConnectionQueryResults" << std::endl;
+    query_results.Print();
   };
 
   // Signal success.
