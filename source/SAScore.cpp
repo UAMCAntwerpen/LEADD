@@ -228,36 +228,57 @@ double CalcComplexityScore(const RDKit::ROMol& mol, bool detect_chirality) {
 	return 0.0 - size_penalty - stereo_penalty - spiro_penalty - bridgehead_penalty - macrocycle_penalty;
 };
 
+double CalcComplexityScore(const RDKit::ROMol& mol, SAScoreComponents& sascore_components, bool detect_chirality) {
+	double n_atoms = mol.getNumAtoms();
+	double n_chiral_centers = CalcNumChiralCenters(mol, detect_chirality);
+	double n_spiro_atoms = RDKit::Descriptors::calcNumSpiroAtoms(mol);
+	double n_bridgehead_atoms = RDKit::Descriptors::calcNumBridgeheadAtoms(mol);
+	sascore_components.size_penalty = std::pow(n_atoms, 1.005) - n_atoms;
+	sascore_components.stereo_penalty = log10(n_chiral_centers + 1);
+	sascore_components.spiro_penalty = log10(n_spiro_atoms + 1);
+	sascore_components.bridgehead_penalty = log10(n_bridgehead_atoms + 1);
+	sascore_components.macrocycle_penalty = 0.0;
+	if (HasMacrocycle(mol)) {
+		sascore_components.macrocycle_penalty = log10(2);
+	};
+	sascore_components.complexity_score = 0.0 - sascore_components.size_penalty - sascore_components.stereo_penalty - sascore_components.spiro_penalty - sascore_components.bridgehead_penalty - sascore_components.macrocycle_penalty;
+	return sascore_components.complexity_score;
+};
+
+double ScaleSAScore(double raw_sascore) {
+	// Scale the SAScore to a value between 1 and 10.
+	double scaled_sascore = 11.0 - (raw_sascore + 5.0) * 9 / 6.5;
+	if (scaled_sascore > 8.0) {
+		scaled_sascore = 8.0 + log(scaled_sascore - 8.0);
+	};
+	if (scaled_sascore > 10.0) {
+		scaled_sascore = 10.0;
+	} else if (scaled_sascore < 1.0) {
+		scaled_sascore = 1.0;
+	};
+	return scaled_sascore;
+};
+
 double SAScore(const RDKit::ROMol& mol, const FeatureLibrary& feature_library, bool detect_chirality) {
 	double feature_score = feature_library.CalcFeatureScore(mol);
 	double complexity_score = CalcComplexityScore(mol, detect_chirality);
-	double raw_sa_score = feature_score + complexity_score;
-	// Scale the SAScore to a value between 1 and 10.
-	double scaled_sa_score = 11.0 - (raw_sa_score + 5.0) * 9 / 6.5;
-	if (scaled_sa_score > 8.0) {
-		scaled_sa_score = 8.0 + log(scaled_sa_score - 8.0);
-	};
-	if (scaled_sa_score > 10.0) {
-		scaled_sa_score = 10.0;
-	} else if (scaled_sa_score < 1.0) {
-		scaled_sa_score = 1.0;
-	};
-	return scaled_sa_score;
+	double raw_sascore = feature_score + complexity_score;
+	double scaled_sascore = ScaleSAScore(raw_sascore);
+	return scaled_sascore;
+};
+
+double SAScore(const RDKit::ROMol& mol, const FeatureLibrary& feature_library, SAScoreComponents& sascore_components, bool detect_chirality) {
+	sascore_components.feature_score = feature_library.CalcFeatureScore(mol);
+	sascore_components.complexity_score = CalcComplexityScore(mol, sascore_components, detect_chirality);
+	double raw_sascore = sascore_components.feature_score + sascore_components.complexity_score;
+	sascore_components.sascore = ScaleSAScore(raw_sascore);
+	return sascore_components.sascore;
 };
 
 double SAScore(const RDKit::ROMol& mol, const RDKit::SparseIntVect<std::uint32_t>& fingerprint, const FeatureLibrary& feature_library, bool detect_chirality) {
 	double feature_score = feature_library.CalcFeatureScore(fingerprint, mol.getNumAtoms());
 	double complexity_score = CalcComplexityScore(mol, detect_chirality);
-	double raw_sa_score = feature_score + complexity_score;
-	// Scale the SAScore to a value between 1 and 10.
-	double scaled_sa_score = 11.0 - (raw_sa_score + 5.0) * 9 / 6.5;
-	if (scaled_sa_score > 8.0) {
-		scaled_sa_score = 8.0 + log(scaled_sa_score - 8.0);
-	};
-	if (scaled_sa_score > 10.0) {
-		scaled_sa_score = 10.0;
-	} else if (scaled_sa_score < 1.0) {
-		scaled_sa_score = 1.0;
-	};
-	return scaled_sa_score;
+	double raw_sascore = feature_score + complexity_score;
+	double scaled_sascore = ScaleSAScore(raw_sascore);
+	return scaled_sascore;
 };

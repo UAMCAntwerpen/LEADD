@@ -10,17 +10,20 @@
 int main(int argc, const char* argv[]) {
   // Set up a command line argument parser and parse the command line arguments.
   std::string input_path, library_path, output_path;
+  bool add_components = false;
 
   boost::program_options::options_description description("Options");
   description.add_options()
     ("help,h",
       "Display this help message.")
     ("input,i", boost::program_options::value<std::string>(&input_path)->required(),
-      "Path to the input file containing molecules in SMILES or SDF format.")
+      "Path to the input file containing molecules in SMILES format.")
     ("library,l", boost::program_options::value<std::string>(&library_path)->required(),
       "Path to the serialized feature library containing the feature scores.")
     ("output,o", boost::program_options::value<std::string>(&output_path)->required(),
-      "Path to the output text file containing the SAScores.");
+      "Path to the output text file containing the SAScores.")
+    ("add_components,c", boost::program_options::bool_switch(&add_components)->default_value(false),
+      "Flag to write out all SAScore components to the file.");
 
   boost::program_options::positional_options_description positionals_description;
   positionals_description.add("input", 1);
@@ -38,6 +41,9 @@ int main(int argc, const char* argv[]) {
   };
   boost::program_options::notify(vm);
 
+  // Create an input molecule stream.
+  RDKit::SmilesMolSupplier supplier(input_path);
+
   // Deserialize the FeatureLibrary.
   FeatureLibrary feature_library;
   std::ifstream library_stream (library_path, std::ifstream::binary);
@@ -47,60 +53,45 @@ int main(int argc, const char* argv[]) {
   // Create an output stream for the SAScores.
   std::ofstream output_stream (output_path);
 
-  // Create a molecule input stream based on the extension of the input file.
-  std::filesystem::path extension = std::filesystem::path(input_path).extension();
-
-  // If the input file is a SMILES file:
-  if (extension == ".smi" || extension == ".ism") {
-    RDKit::SmilesMolSupplier supplier(input_path);
-
-    // Initialize a progress bar.
-    unsigned n_mols = supplier.length();
-    supplier.reset();
-    boost::progress_display progress(n_mols);
-
-    // Loop over the input molecules.
-    std::unique_ptr<RDKit::ROMol> mol;
-    while (!supplier.atEnd()) {
-      mol.reset(supplier.next());
-      // Verify that the molecule was successfully read.
-      if (mol) {
-        // Calculate its SAScore and write it to the output file.
-        double sascore = SAScore(*mol, feature_library);
-        output_stream << RDKit::MolToSmiles(*mol) << " " << sascore << "\n";
-      } else {
-        std::cout << "WARNING: Molecule couldn't be read." << std::endl;
-      };
-      ++progress;
-    };
-
-  // If the input file is a SDF file:
-  } else if (extension == ".sdf") {
-    RDKit::SDMolSupplier supplier(input_path);
-
-    // Initialize a progress bar.
-    unsigned n_mols = supplier.length();
-    supplier.reset();
-    boost::progress_display progress(n_mols);
-
-    // Loop over the input molecules.
-    std::unique_ptr<RDKit::ROMol> mol;
-    while (!supplier.atEnd()) {
-      mol.reset(supplier.next());
-      // Verify that the molecule was successfully read.
-      if (mol) {
-        // Calculate its SAScore and write it to the output file.
-        double sascore = SAScore(*mol, feature_library);
-        output_stream << RDKit::MolToSmiles(*mol) << " " << sascore << "\n";
-      } else {
-        std::cout << "WARNING: Molecule couldn't be read." << std::endl;
-      };
-      ++progress;
-    };
-
-  // If the molecule input format is something else, throw an error.
+  // Create a header for the output file.
+  if (add_components) {
+    output_stream << "SMILES SAScore FeatureScore ComplexityScore SizePenalty StereoPenalty SpiroPenalty BridgeheadPenalty MacrocyclePenalty\n";
   } else {
-    throw std::runtime_error("Unrecognized input format. Input should be either SMILES or SDF.");
+    output_stream << "SMILES SAScore\n";
+  };
+
+  // Initialize a progress bar.
+  unsigned n_mols = supplier.length();
+  supplier.reset();
+  boost::progress_display progress(n_mols);
+
+  // Loop over the input molecules.
+  std::unique_ptr<RDKit::ROMol> mol;
+  while (!supplier.atEnd()) {
+    mol.reset(supplier.next());
+    // Verify that the molecule was successfully read.
+    if (mol) {
+      // Calculate its SAScore and write it to the output file.
+      if (add_components) {
+        SAScoreComponents sascore_components;
+        double sascore = SAScore(*mol, feature_library, sascore_components);
+        output_stream << RDKit::MolToSmiles(*mol) << " ";
+        output_stream << sascore_components.sascore << " ";
+        output_stream << sascore_components.feature_score << " ";
+        output_stream << sascore_components.complexity_score << " ";
+        output_stream << sascore_components.size_penalty << " ";
+        output_stream << sascore_components.stereo_penalty << " ";
+        output_stream << sascore_components.spiro_penalty << " ";
+        output_stream << sascore_components.bridgehead_penalty << " ";
+        output_stream << sascore_components.macrocycle_penalty << "\n";
+      } else {
+        double sascore = SAScore(*mol, feature_library);
+        output_stream << RDKit::MolToSmiles(*mol) << " " << sascore << "\n";
+      };
+    } else {
+      std::cout << "WARNING: Molecule couldn't be read." << std::endl;
+    };
+    ++progress;
   };
 
   // Close the output stream.
