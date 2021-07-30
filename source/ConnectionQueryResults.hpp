@@ -33,7 +33,7 @@ class ConnectionQueryResults {
 
 public:
   ConnectionQueryResults();
-  ConnectionQueryResults(const PseudofragmentDB& database, unsigned stringency, float acyclic_frequency_gamma = 1.0, float acyclic_size_gamma = 0.0, float ring_frequency_gamma = 1.0, float ring_size_gamma = 0.0);
+  ConnectionQueryResults(const PseudofragmentDB& database, unsigned stringency, unsigned lax_compatibility_threshold = 0, float acyclic_frequency_gamma = 1.0, float acyclic_size_gamma = 0.0, float ring_frequency_gamma = 1.0, float ring_size_gamma = 0.0);
 
   // Function to calculate the query results according to the strictest definition.
   void CalculateStrictQueryResults(const PseudofragmentDB& database);

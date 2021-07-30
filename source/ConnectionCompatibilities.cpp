@@ -1,10 +1,13 @@
 #include "ConnectionCompatibilities.hpp"
 
 // Definition of the version integer of the ConnectionQueryResults class.
-extern const unsigned connection_compatibilities_version = 20210615;
+extern const unsigned connection_compatibilities_version = 20210729;
 
 ConnectionCompatibilities::ConnectionCompatibilities() = default;
-ConnectionCompatibilities::ConnectionCompatibilities(const PseudofragmentDB& database, unsigned stringency) : stringency(stringency) {
+ConnectionCompatibilities::ConnectionCompatibilities(const PseudofragmentDB& database, unsigned stringency, unsigned lax_compatibility_threshold) :
+  stringency(stringency),
+  lax_compatibility_threshold(lax_compatibility_threshold) {
+  assert(lax_compatibility_threshold >= 0);
   // Initialize a progress bar.
   std::cout << "Calculating ConnectionCompatibilities..." << std::endl;
   sqlite3_int64 n_connections = database.GetNConnections();
@@ -54,13 +57,28 @@ ConnectionCompatibilities::ConnectionCompatibilities(const PseudofragmentDB& dat
   //      paired with the query Connection's starting atom type.
   //  (2) It shares the query Connection's BondType.
   } else if (stringency == 1) {
-    // Record the observed atom pairings.
+    // Retrieve all unique bond types.
+    std::vector<std::uint32_t> bond_types;
+    sqlite3_stmt* select_bond_types;
+    int sqlite3_result_code = sqlite3_prepare_v2(database.GetDatabaseConnection(), "SELECT DISTINCT bond_type FROM connections", -1, &select_bond_types, nullptr);
+    sqlite3_result_code = sqlite3_step(select_bond_types);
+    while (sqlite3_result_code == SQLITE_ROW) {
+      std::uint32_t bond_type = sqlite3_column_int64(select_bond_types, 0);
+      bond_types.push_back(bond_type);
+      sqlite3_result_code = sqlite3_step(select_bond_types);
+    };
+    sqlite3_result_code = sqlite3_finalize(select_bond_types);
+    // Record the observed atom pairings and Connection frequencies.
     std::unordered_map<std::uint32_t, std::unordered_set<std::uint32_t>> observed_atom_pairs;
     std::unordered_map<std::uint32_t, std::unordered_set<std::uint32_t>>::iterator atom_pairs_it;
+    std::unordered_map<Connection, unsigned> connection_frequencies;
     // Iterate over the Connections in the database.
     PseudofragmentDB::ConnectionIterator connection_it (database);
     while (!connection_it.AtEnd()) {
       const Connection& connection = connection_it.GetConnection();
+      unsigned connection_frequency = connection_it.GetConnectionFrequency();
+      // Store the Connection frequency.
+      connection_frequencies.insert({connection, connection_frequency});
       // Insert a entry in the compatibility table for the Connection.
       compatibility_table.insert({connection, {}});
       // Store the start-end atom type pair.
@@ -97,7 +115,8 @@ ConnectionCompatibilities::ConnectionCompatibilities(const PseudofragmentDB& dat
       PseudofragmentDB::ConnectionIterator chunk_it (database, chunk.first, chunk.second);
       while (!chunk_it.AtEnd()) {
         const Connection& connection = chunk_it.GetConnection();
-        CONNECTIONS_SET& compatible_connections = compatibility_table[connection];
+        std::vector<std::pair<Connection, unsigned>> compatible_connections;
+        // CONNECTIONS_SET& compatible_connections = compatibility_table[connection];
         std::uint32_t start_atom_type = connection.GetStartAtomType();
         std::uint32_t bond_type = connection.GetBondType();
         // For each compatible starting atom type, fetch all matching Connections.
@@ -107,13 +126,44 @@ ConnectionCompatibilities::ConnectionCompatibilities(const PseudofragmentDB& dat
           sqlite3_result_code = sqlite3_step(select_compatible_atom_types);
           while (sqlite3_result_code == SQLITE_ROW) {
             std::uint32_t compatible_end_atom_type = sqlite3_column_int64(select_compatible_atom_types, 0);
+            Connection connection (compatible_start_atom_type, compatible_end_atom_type, bond_type);
+            // Get the frequency of the atom pair.
+            std::unordered_map<Connection, unsigned>::const_iterator cfreq_it, cfreq_end_it = connection_frequencies.end();
+            unsigned atom_pair_frequency = 0;
+            for (std::uint32_t bt : bond_types) {
+              Connection tmp_connection (start_atom_type, compatible_start_atom_type, bt);
+              cfreq_it = connection_frequencies.find(tmp_connection);
+              if (cfreq_it != cfreq_end_it) {
+                atom_pair_frequency += cfreq_it->second;
+              };
+            };
             // Record the Connection compatibility.
-            compatible_connections.emplace(compatible_start_atom_type, compatible_end_atom_type, bond_type);
+            // compatible_connections.emplace(compatible_start_atom_type, compatible_end_atom_type, bond_type);
+            compatible_connections.push_back({connection, atom_pair_frequency});
             sqlite3_result_code = sqlite3_step(select_compatible_atom_types);
           };
           sqlite3_clear_bindings(select_compatible_atom_types);
           sqlite3_reset(select_compatible_atom_types);
         };
+        // Keep only the compatible Connections whose frequency exceeds the threshold.
+        std::sort(compatible_connections.begin(), compatible_connections.end(),
+          [](const std::pair<Connection, unsigned>& c1, const std::pair<Connection, unsigned>& c2) {
+            return c1.second > c2.second;
+          });
+        unsigned max_atom_pair_frequency = compatible_connections[0].second;
+        std::vector<std::pair<Connection, unsigned>>::iterator last_it = std::lower_bound(compatible_connections.begin(), compatible_connections.end(), lax_compatibility_threshold,
+          [](const std::pair<Connection, unsigned>& c, unsigned t) {
+            return c.second >= t;
+          });
+        // Insert the remaining compatible Connections into the compatibility table.
+        CONNECTIONS_SET& connection_table_entry = compatibility_table[connection];
+        std::vector<std::pair<Connection, unsigned>>::iterator it;
+        for (it = compatible_connections.begin(); it != last_it; ++it) {
+          connection_table_entry.insert(it->first);
+        };
+        // The mirrored Connection is always considered compatible. Otherwise the
+        // algorithm breaks.
+        connection_table_entry.insert(connection.Mirror());
         ++chunk_it;
         #pragma omp critical
         {
@@ -244,6 +294,10 @@ Connection ConnectionCompatibilities::GetRandomCompatibleConnection(const Connec
 
 unsigned ConnectionCompatibilities::GetStringency() const {
   return stringency;
+};
+
+unsigned ConnectionCompatibilities::GetLaxCompatibilityThreshold() const {
+  return lax_compatibility_threshold;
 };
 
 bool ConnectionCompatibilities::HasConnection(const Connection& connection) const {

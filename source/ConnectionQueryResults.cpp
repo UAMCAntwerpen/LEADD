@@ -1,12 +1,12 @@
 #include "ConnectionQueryResults.hpp"
 
 // Definition of the version integer of the ConnectionQueryResults class.
-extern const unsigned connection_query_results_version = 20210615;
+extern const unsigned connection_query_results_version = 20210729;
 
 // Class ConnectionQueryResults
 ConnectionQueryResults::ConnectionQueryResults() = default;
-ConnectionQueryResults::ConnectionQueryResults(const PseudofragmentDB& database, unsigned stringency, float acyclic_frequency_gamma, float acyclic_size_gamma, float ring_frequency_gamma, float ring_size_gamma) :
-  compatibilities(database, stringency),
+ConnectionQueryResults::ConnectionQueryResults(const PseudofragmentDB& database, unsigned stringency, unsigned lax_compatibility_threshold, float acyclic_frequency_gamma, float acyclic_size_gamma, float ring_frequency_gamma, float ring_size_gamma) :
+  compatibilities(database, stringency, lax_compatibility_threshold),
   acyclic_frequency_gamma(acyclic_frequency_gamma),
   acyclic_size_gamma(acyclic_size_gamma),
   ring_frequency_gamma(ring_frequency_gamma),

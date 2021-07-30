@@ -21,11 +21,21 @@ class ConnectionCompatibilities {
   // relationships.
   COMPATIBILITY_TABLE compatibility_table;
   // Integer symbolizing the compatibility definition.
+  //  - 0 = valence model
+  //  - 1 = lax compatibility
+  //  - 2 = strict compatibility
   unsigned stringency = 0;
+  // If a Connection has more than one compatible Connection according to the lax
+  // compatibility definition, the frequencies of the atom pairs defining the
+  // compatibility are recorded. Compatible Connections are kept only if the
+  // corresponding atom pair frequency exceeds the below threshold. If the
+  // threshold == 1 at least one Connection is guaranteed to be beconsidered
+  // compatible. This parameter only applies to the lax compatibility definition.
+  unsigned lax_compatibility_threshold = 0;
 
 public:
   ConnectionCompatibilities();
-  ConnectionCompatibilities(const PseudofragmentDB& database, unsigned stringency = 1);
+  ConnectionCompatibilities(const PseudofragmentDB& database, unsigned stringency = 1, unsigned lax_compatibility_threshold = 0);
 
   CONNECTIONS_SET& operator[](const Connection& connection);
   const CONNECTIONS_SET& at(const Connection& connection) const;
@@ -35,6 +45,7 @@ public:
   Connection GetRandomCompatibleConnection(const ConnectionsTable& connections_table, const Connection& connection, std::mt19937& prng) const;
 
   unsigned GetStringency() const;
+  unsigned GetLaxCompatibilityThreshold() const;
   bool HasConnection(const Connection& connection) const;
   const COMPATIBILITY_TABLE& GetCompatibilityTable() const;
   void Print() const;
@@ -42,7 +53,7 @@ public:
 private:
   template <class Archive>
   void serialize(Archive& ar, const unsigned version = connection_compatibilities_version) {
-    ar & compatibility_table & stringency;
+    ar & compatibility_table & stringency & lax_compatibility_threshold;
   };
 
   friend class boost::serialization::access;

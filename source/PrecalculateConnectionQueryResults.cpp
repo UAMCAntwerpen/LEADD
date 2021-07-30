@@ -7,6 +7,7 @@ int main(int argc, const char* argv[]) {
   // Set up a command line argument parser.
   std::string input, output, settings_file;
   unsigned stringency;
+  unsigned threshold;
 
   boost::program_options::options_description description("Options");
   description.add_options()
@@ -19,12 +20,13 @@ int main(int argc, const char* argv[]) {
     ("settings,t", boost::program_options::value<std::string>(&settings_file),
       "Path to the settings file containing parameters to calculate the weights of the fragments.")
     ("stringency,s", boost::program_options::value<unsigned>(&stringency)->default_value(1),
-      "Integer between 0 and 2 symbolizing the stringency of the lax connection compatibility definition (0 = valence, 1 = lax, 2 = strict).");
+      "Integer between 0 and 2 symbolizing the stringency of the lax connection compatibility definition (0 = valence, 1 = lax, 2 = strict).")
+    ("threshold,r", boost::program_options::value<unsigned>(&threshold)->default_value(0),
+      "Connection frequency threshold for lax compatibility consideration.");
 
   boost::program_options::positional_options_description positionals_description;
   positionals_description.add("input", 1);
   positionals_description.add("output", 1);
-  positionals_description.add("stringency", 1);
   boost::program_options::variables_map vm;
   boost::program_options::command_line_parser parser(argc, argv);
   parser.options(description);
@@ -61,7 +63,7 @@ int main(int argc, const char* argv[]) {
   PseudofragmentDB database (input);
 
   // Compute which Pseudofragments are compatible with each Connection.
-  ConnectionQueryResults query_results (database, stringency, settings.GetAcyclicFrequencyGamma(), settings.GetAcyclicSizeGamma(), settings.GetRingFrequencyGamma(), settings.GetRingSizeGamma());
+  ConnectionQueryResults query_results (database, stringency, threshold, settings.GetAcyclicFrequencyGamma(), settings.GetAcyclicSizeGamma(), settings.GetRingFrequencyGamma(), settings.GetRingSizeGamma());
 
   // Store the data in a binary file.
   std::ofstream outstream(output, std::ofstream::binary);
