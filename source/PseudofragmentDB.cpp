@@ -113,7 +113,7 @@ void PseudofragmentDB::PrepareStatements() {
   assert(sqlite3_result_code == SQLITE_OK);
   sqlite3_result_code = sqlite3_prepare_v2(database, "INSERT INTO pseudofragments (smiles, ring_part, has_ring, size, pickle, frequency) VALUES (?, ?, ?, ?, ?, 1) ON CONFLICT (smiles, ring_part) DO UPDATE SET frequency=frequency+1", -1, &insert_pseudofragment, nullptr);
   assert(sqlite3_result_code == SQLITE_OK);
-  sqlite3_result_code = sqlite3_prepare_v2(database, "INSERT INTO connections (start_atom_type, end_atom_type, bond_type, frequency) VALUES (?, ?, ?, 1) ON CONFLICT (start_atom_type, end_atom_type, bond_type) DO UPDATE SET frequency=frequency+1", -1, &insert_connection, nullptr);
+  sqlite3_result_code = sqlite3_prepare_v2(database, "INSERT INTO connections (start_atom_type, end_atom_type, bond_type, frequency) VALUES (?, ?, ?, 1) ON CONFLICT (start_atom_type, end_atom_type, bond_type) DO UPDATE SET frequency=frequency+?", -1, &insert_connection, nullptr);
   assert(sqlite3_result_code == SQLITE_OK);
   sqlite3_result_code = sqlite3_prepare_v2(database, "INSERT INTO sources_pseudofragments (source_id, pseudofragment_id, frequency) VALUES (?, ?, 1) ON CONFLICT (source_id, pseudofragment_id) DO UPDATE SET frequency=frequency+1", -1, &insert_source_pseudofragment_relationship, nullptr);
   assert(sqlite3_result_code == SQLITE_OK);
@@ -308,11 +308,12 @@ sqlite3_int64 PseudofragmentDB::InsertPseudofragment(const Pseudofragment& pseud
   return pseudofragment_id;
 };
 
-sqlite3_int64 PseudofragmentDB::InsertConnection(const Connection& connection) const {
+sqlite3_int64 PseudofragmentDB::InsertConnection(const Connection& connection, unsigned n) const {
   // Insert the Connection in the database.
   sqlite3_bind_int64(insert_connection, 1, connection.GetStartAtomType());
   sqlite3_bind_int64(insert_connection, 2, connection.GetEndAtomType());
   sqlite3_bind_int64(insert_connection, 3, connection.GetBondType());
+  sqlite3_bind_int64(insert_connection, 4, n);
   int sqlite3_result_code = sqlite3_step(insert_connection);
   assert(sqlite3_result_code == SQLITE_DONE);
   sqlite3_clear_bindings(insert_connection);

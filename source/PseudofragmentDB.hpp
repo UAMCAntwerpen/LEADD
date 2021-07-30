@@ -45,7 +45,7 @@ public:
   sqlite3_int64 InsertSourceMolecule(const std::string& smiles) const;
   sqlite3_int64 InsertSourceMolecule(const RDKit::ROMol& molecule) const;
   sqlite3_int64 InsertPseudofragment(const Pseudofragment& pseudofragment) const;
-  sqlite3_int64 InsertConnection(const Connection& connection) const;
+  sqlite3_int64 InsertConnection(const Connection& connection, unsigned n) const;
   void InsertSourceMoleculePseudofragmentRelationship(sqlite3_int64 source_molecule_id, sqlite3_int64 pseudofragment_id) const;
   void InsertPseudofragmentConnectionRelationship(sqlite3_int64 pseudofragment_id, sqlite3_int64 connection_id, unsigned frequency) const;
 

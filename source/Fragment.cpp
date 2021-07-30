@@ -135,7 +135,7 @@ int main(int argc, const char* argv[]) {
           database.InsertSourceMoleculePseudofragmentRelationship(source_molecule_id, pseudofragment_id);
           // Insert the Pseudofragment's Connections.
           for (const auto& [connection, connection_points] : pseudofragment.GetConnections()) {
-            sqlite3_int64 connection_id = database.InsertConnection(connection);
+            sqlite3_int64 connection_id = database.InsertConnection(connection, connection_points.size());
             // Record the fragment-connection relationship.
             database.InsertPseudofragmentConnectionRelationship(pseudofragment_id, connection_id, connection_points.size());
           };
