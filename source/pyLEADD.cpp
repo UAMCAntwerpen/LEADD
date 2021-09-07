@@ -23,6 +23,7 @@ PYBIND11_MODULE(pyLEADD, module) {
   pybind11::class_<ReconstructionSettings>(module, "ReconstructionSettings")
     .def(pybind11::init<const std::string&, bool>(),
          pybind11::arg("settings_file_path"), pybind11::arg("check_paths") = true)
+    .def("GetPRNGSeed", &ReconstructionSettings::GetPRNGSeed)
     .def("SetPRNGSeed", &ReconstructionSettings::SetPRNGSeed)
     .def("SetNRingAtomsMean", &ReconstructionSettings::SetNRingAtomsMean)
     .def("SetNRingAtomsSTDEV", &ReconstructionSettings::SetNRingAtomsSTDEV)

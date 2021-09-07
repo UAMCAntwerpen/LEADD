@@ -98,8 +98,9 @@ class LEADD(GoalDirectedGenerator):
                 print("WARNING: Guided evolution isn't compatible with starting populations and was disabled.")
 
         # For reproducibility purposes set a random (but defined) PRNG seed.
-        seed = random.randint(0, 2147483647)
-        self.reconstruction_settings.SetPRNGSeed(seed)
+        if self.reconstruction_settings.GetPRNGSeed() == 0:
+            seed = random.randint(0, 2147483647)
+            self.reconstruction_settings.SetPRNGSeed(seed)
 
     def score_children(self, scoring_function):
         smiles = [individual.GetSanitizedSMILES() for individual in self.leadd.GetPopulation() if individual.IsChild()]
