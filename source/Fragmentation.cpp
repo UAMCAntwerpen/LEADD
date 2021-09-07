@@ -271,7 +271,6 @@ std::vector<RDKit::ROMOL_SPTR> LinearPathsToFragments(RDKit::ROMol& molecule, un
     for (const auto& [length, paths] : paths_by_length) {
       for (const std::vector<int>& path : paths) {
         RDKit::ROMOL_SPTR fragment = PathToFragment(molecule, path, copy_old_idx_property);
-        std::cout << RDKit::MolToSmiles(*fragment) << std::endl;
         fragments.push_back(fragment);
       };
     };
@@ -370,89 +369,6 @@ std::vector<bool> RingPartFragmentMask(const RDKit::ROMol& molecule, const std::
     mask[fragment_idx] = is_ring_part;
   };
   return mask;
-};
-
-std::vector<unsigned> InvertAtomOrder(const std::vector<unsigned>& atom_order) {
-  std::vector<unsigned> atom_order_copy = atom_order;
-  std::vector<unsigned> inverted_atom_order (atom_order_copy.size());
-  std::iota(inverted_atom_order.begin(), inverted_atom_order.end(), 0);
-  std::sort(inverted_atom_order.begin(), inverted_atom_order.end(),
-    [&](unsigned i, unsigned j) {
-      return atom_order_copy[i] < atom_order_copy[j];
-    });
-  return inverted_atom_order;
-};
-
-std::vector<unsigned> GetCanonicalSMILESAtomOrder(const RDKit::ROMol& molecule) {
-  // Create the canonical SMILES.
-  std::string smiles = RDKit::MolToSmiles(molecule);
-  // Retrieve the order in which atoms were written to the SMILES.
-  std::vector<unsigned> canonical_smiles_atom_order;
-  molecule.getProp(RDKit::common_properties::_smilesAtomOutputOrder, canonical_smiles_atom_order);
-  return canonical_smiles_atom_order;
-};
-
-std::vector<unsigned> GetCanonicalAtomOrder(const RDKit::ROMol& molecule) {
-  // Get the canonical atom ranks. The lower the rank the higher the priority
-  // of the atom.
-  std::vector<unsigned> atom_ranks (molecule.getNumAtoms());
-  RDKit::Canon::rankMolAtoms(molecule, atom_ranks);
-  return atom_ranks;
-};
-
-void EraseProperties(RDKit::RWMol& molecule) {
-  RDKit::Dict& molecule_properties = molecule.getDict();
-  molecule_properties.reset();
-  for (RDKit::Atom* atom : molecule.atoms()) {
-    RDKit::Dict& atom_properties = atom->getDict();
-    atom_properties.reset();
-  };
-};
-
-std::string MakePseudomolSMILES(const RDKit::ROMol& pseudomol, const ConnectionsTable& connections_table) {
-  // This function attempts to make a canonical connectivity-encoding CXSMILES.
-  // For most molecular graphs it will be fully canonical. However, in symmetrical
-  // molecules the canonical atom order isn't unique. Since the ConnectionsTable
-  // is expressed in terms of atom indices, and its information is encoded in the
-  // SMILES, for symmetrical molecules multiple equivalent yet distinct SMILES exist.
-  // As far as I can tell, there's no way of using the ConnectionsTable in the
-  // canonicalization process because Connections must be expressed as either
-  // 64 or 96 bits, and none of the properties used during canonicalization can
-  // store such large values.
-  // Calculate the canonical atom order and its inverse.
-  std::vector<unsigned> atom_order = GetCanonicalAtomOrder(pseudomol);
-  std::vector<unsigned> inverted_atom_order = InvertAtomOrder(atom_order);
-  // Create a dummy molecule with the atoms renumbered according to the inverted
-  // atom order. We have to invert it simply because that's what the function
-  // expects as an argument.
-  RDKit::ROMol* tmp_mol = RDKit::MolOps::renumberAtoms(pseudomol, inverted_atom_order);
-  RDKit::RWMol canonical_pseudomol = *tmp_mol;
-  EraseProperties(canonical_pseudomol);
-  delete tmp_mol;
-  // Renumber the ConnectionsTable using the non-inverted atom order.
-  ConnectionsTable renumbered_connections_table = connections_table.RenumberAtoms(atom_order);
-  // Invert the renumbered ConnectionsTable. Note that the inverted table is ordered.
-  // This is important to canonicalize the SMILES.
-  INVERTED_CONNECTIONS_MAP inverted_connections_table = renumbered_connections_table.GetInvertedTable();
-  // Iterate over the inverted ConnectionsTable and convert the ConnectionPoints into
-  // numbered atomic properties.
-  for (const auto& [atom_idx, connections] : inverted_connections_table) {
-    RDKit::Atom* atom = canonical_pseudomol.getAtomWithIdx(atom_idx);
-    unsigned connection_idx = 1;
-    // Convert each ConnectionPoint into an atomic property.
-    for (const Connection& connection : connections) {
-      std::string str_connection_idx = std::to_string(connection_idx);
-      std::string start_atom_type_property_label = "S" + str_connection_idx;
-      std::string end_atom_type_property_label = "E" + str_connection_idx;
-      std::string bond_type_property_label = "B" + str_connection_idx;
-      // atom->setProp<std::uint64_t>(connection_property_label, encoded_atom_types);
-      atom->setProp<std::uint32_t>(start_atom_type_property_label, connection.GetStartAtomType());
-      atom->setProp<std::uint32_t>(end_atom_type_property_label, connection.GetEndAtomType());
-      atom->setProp<std::uint32_t>(bond_type_property_label, connection.GetBondType());
-      ++connection_idx;
-    };
-  };
-  return RDKit::MolToCXSmiles(canonical_pseudomol);
 };
 
 Pseudofragment FragmentToPseudofragment(const RDKit::ROMol& molecule, const RDKit::ROMOL_SPTR fragment, std::vector<std::uint32_t> molecule_atom_types, bool has_ring, bool is_ring_part) {

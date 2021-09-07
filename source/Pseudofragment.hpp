@@ -10,6 +10,7 @@
 #include <GraphMol/SmilesParse/SmilesWrite.h>
 #include <GraphMol/Fingerprints/MorganFingerprints.h>
 #include <GraphMol/MolPickler.h>
+#include <GraphMol/new_canon.h>
 #include <boost/serialization/vector.hpp>
 #include <boost/serialization/unordered_map.hpp>
 
@@ -181,8 +182,9 @@ public:
   std::vector<ConnectionPoint*> GetConnectionPointsWithIndices(const Connection& connection, std::vector<unsigned> atom_indices);
   std::vector<ConnectionPoint*> GetConnectionPoints(const Connection& connection, const std::vector<ConnectionPoint>& cpoints);
 
-  // Function that returns a re-numbered copy of the ConnectionsTable.
+  // Functions that return a re-numbered copy of the ConnectionsTable.
   ConnectionsTable RenumberAtoms(const std::vector<unsigned>& atom_order) const;
+  ConnectionsTable RenumberAtoms(const std::map<unsigned, unsigned>& atom_map) const;
 
   // Function that returns an atom index-Connections map.
   INVERTED_CONNECTIONS_MAP GetInvertedTable() const;
@@ -209,10 +211,28 @@ void AssignImmutableAtomIndices(RDKit::RWMol& molecule);
 unsigned GetImmutableAtomIdx(const RDKit::Atom* atom);
 RDKit::Atom* GetAtomWithImmutableIdx(RDKit::RWMol& molecule, unsigned immutable_atom_idx);
 
+
+// Erases all molecular and atomic properties.
+void EraseProperties(RDKit::RWMol& molecule);
+
+// Determine the order in which atoms will be written to canonical SMILES.
+std::vector<unsigned> GetCanonicalSMILESAtomOrder(const RDKit::ROMol& molecule);
+
+// Determine the canonical atom order of a molecule.
+std::vector<unsigned> GetCanonicalAtomOrder(const RDKit::ROMol& molecule);
+
+// Renumber a molecule's atoms to follow the canonical atom order.
+RDKit::ROMOL_SPTR CanonicalizeAtomOrder(const RDKit::ROMol& molecule);
+
+// Inverts the logic of atom orders.
+std::vector<unsigned> InvertAtomOrder(const std::vector<unsigned>& atom_order);
+
+// Generates the canonical connectivity-encoding CXSMILES of a fragment.
+std::string MakePseudomolSMILES(const RDKit::ROMol& pseudomol, const ConnectionsTable& connections);
+
 // Function to sanitize a non-valence-compliant pseudomolecule replacing its
 // ConnectionPoints with hydrogens.
 RDKit::RWMol SanitizePseudomol(const RDKit::RWMol& pseudomol, const ConnectionsTable& connections_table, bool use_immutable_indices);
-
 
 // Class to store a molecular subgraph alongside its ConnectionPoints as a fragment.
 class Pseudofragment {

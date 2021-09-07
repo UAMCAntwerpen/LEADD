@@ -7,7 +7,6 @@
 #include <GraphMol/Subgraphs/Subgraphs.h>
 #include <GraphMol/Subgraphs/SubgraphUtils.h>
 #include <GraphMol/ForceFieldHelpers/MMFF/AtomTyper.h>
-#include <GraphMol/new_canon.h>
 
 // Recursively expand a ring system by annexing smallest rings that share an atom.
 void ExpandRingSystem(std::set<unsigned>& ring_system, std::vector<std::set<unsigned>>& rings);
@@ -78,21 +77,6 @@ std::vector<bool> RingFragmentMask(const std::vector<RDKit::ROMOL_SPTR>& fragmen
 
 // Determines which fragments contain parts of ring systems.
 std::vector<bool> RingPartFragmentMask(const RDKit::ROMol& molecule, const std::vector<RDKit::ROMOL_SPTR>& fragments);
-
-// Determine the order in which atoms will be written to canonical SMILES.
-std::vector<unsigned> GetCanonicalSMILESAtomOrder(const RDKit::ROMol& molecule);
-
-// Determine the canonical atom order of a molecule.
-std::vector<unsigned> GetCanonicalAtomOrder(const RDKit::ROMol& molecule);
-
-// Renumber a molecule's atoms to follow the canonical atom order.
-RDKit::ROMOL_SPTR CanonicalizeAtomOrder(const RDKit::ROMol& molecule);
-
-// Erases all molecular and atomic properties.
-void EraseProperties(RDKit::RWMol& molecule);
-
-// Generates the canonical connectivity-encoding CXSMILES of a fragment.
-std::string MakePseudomolSMILES(const RDKit::ROMol& pseudomol, const ConnectionsTable& connections);
 
 // Converts a fragment into a Pseudofragment.
 Pseudofragment FragmentToPseudofragment(const RDKit::ROMol& molecule, const RDKit::ROMOL_SPTR fragment, std::vector<std::uint32_t> molecule_atom_types, bool has_ring, bool is_ring_part);
