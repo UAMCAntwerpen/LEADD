@@ -3902,21 +3902,21 @@ bool ReconstructedMol::Transfection(const std::string& location, ConnectionQuery
       if (sp.has_ring) {
         sp.RetrieveRingSubstitutes(inventory, query_results.compatibilities, prng);
         if (sp.has_ring_substitutes) {
+          sp.CalcInventoryRingBasedWeight();
+          substitition_point_candidates.push_back(&sp);
+          substitution_point_weights.push_back(sp.weight);
           substitutes_exist = true;
         };
-        sp.CalcInventoryRingBasedWeight();
-        substitition_point_candidates.push_back(&sp);
-        substitution_point_weights.push_back(sp.weight);
       // and the SubstitutionPoint pertains to an acyclic MolBrick
       } else {
         // retrieve acyclic substitutes.
         sp.RetrieveAcyclicSubstitutes(inventory, query_results.compatibilities, prng);
         if (sp.has_acyclic_substitutes) {
+          sp.CalcInventoryAcyclicBasedWeight();
+          substitition_point_candidates.push_back(&sp);
+          substitution_point_weights.push_back(sp.weight);
           substitutes_exist = true;
         };
-        sp.CalcInventoryAcyclicBasedWeight();
-        substitition_point_candidates.push_back(&sp);
-        substitution_point_weights.push_back(sp.weight);
       };
     };
   // If the number of rings should be increased
@@ -3929,11 +3929,11 @@ bool ReconstructedMol::Transfection(const std::string& location, ConnectionQuery
         // retrieve ring substitutes.
         sp.RetrieveRingSubstitutes(inventory, query_results.compatibilities, prng);
         if (sp.has_ring_substitutes) {
+          sp.CalcInventoryRingBasedWeight();
+          substitition_point_candidates.push_back(&sp);
+          substitution_point_weights.push_back(sp.weight);
           substitutes_exist = true;
         };
-        sp.CalcInventoryRingBasedWeight();
-        substitition_point_candidates.push_back(&sp);
-        substitution_point_weights.push_back(sp.weight);
       };
     };
   // If the number of rings should be decreased
@@ -3946,11 +3946,11 @@ bool ReconstructedMol::Transfection(const std::string& location, ConnectionQuery
         // retrieve acyclic substitutes.
         sp.RetrieveAcyclicSubstitutes(inventory, query_results.compatibilities, prng);
         if (sp.has_acyclic_substitutes) {
+          sp.CalcInventoryAcyclicBasedWeight();
+          substitition_point_candidates.push_back(&sp);
+          substitution_point_weights.push_back(sp.weight);
           substitutes_exist = true;
         };
-        sp.CalcInventoryAcyclicBasedWeight();
-        substitition_point_candidates.push_back(&sp);
-        substitution_point_weights.push_back(sp.weight);
       };
     };
   };
@@ -4818,7 +4818,7 @@ bool ReconstructedMol::Evolve(ReconstructionSettings& settings, const Pseudofrag
   // the ReconstructionSettings.
   const std::string& operation = settings.ChooseOperation(prng);
 
-  // std::cout << "Attempting operation: " << operation << std::endl;
+  // std::cout << "Attempting operation " << operation << " on ReconstructedMol " << id << std::endl;
 
   ++report.attempt_frequencies.at(operation);
 
