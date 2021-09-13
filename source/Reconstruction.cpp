@@ -4952,8 +4952,17 @@ void ReconstructedMol::Sanitize() {
   if (sanitized_mol_updated) {
     return;
   };
-  sanitized_mol = SanitizePseudomol(pseudomol, connections, true);
-  sanitized_mol_updated = true;
+  try {
+    sanitized_mol = SanitizePseudomol(pseudomol, connections, true);
+    sanitized_mol_updated = true;
+  } catch (const std::exception& e) {
+    std::cout << "ERROR: Sanitization failed for ReconstructedMol containing Pseudofragments ";
+    for (const auto& [brick_idx, brick] : bricks) {
+      std::cout << brick.pseudofragment_id << " ";
+    };
+    std::cout << std::endl;
+    throw;
+  };
 };
 
 void ReconstructedMol::AssignUnspecifiedStereochemistry(std::mt19937& prng) {
