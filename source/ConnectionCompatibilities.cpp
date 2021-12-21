@@ -173,36 +173,6 @@ ConnectionCompatibilities::ConnectionCompatibilities(const PseudofragmentDB& dat
       chunk_it.Finalize();
       sqlite3_finalize(select_compatible_atom_types);
     };
-    // // Define the ConnectionCompatibilities.
-    // sqlite3_stmt* select_compatible_atom_types;
-    // int sqlite3_result_code = sqlite3_prepare_v2(database.GetDatabaseConnection(), "SELECT end_atom_type FROM connections WHERE start_atom_type = ? AND bond_type = ?", -1, &select_compatible_atom_types, nullptr);
-    // // Iterate over the database Connections again.
-    // connection_it = PseudofragmentDB::ConnectionIterator(database);
-    // while (!connection_it.AtEnd()) {
-    //   const Connection& connection = connection_it.GetConnection();
-    //   auto [it, inserted] = compatibility_table.insert({connection, {}});
-    //   CONNECTIONS_SET& compatible_connections = it->second;
-    //   std::uint32_t start_atom_type = connection.GetStartAtomType();
-    //   std::uint32_t bond_type = connection.GetBondType();
-    //   // For each compatible starting atom type, fetch all matching Connections.
-    //   for (std::uint32_t compatible_start_atom_type : observed_atom_pairs[start_atom_type]) {
-    //     sqlite3_bind_int64(select_compatible_atom_types, 1, compatible_start_atom_type);
-    //     sqlite3_bind_int64(select_compatible_atom_types, 2, bond_type);
-    //     sqlite3_result_code = sqlite3_step(select_compatible_atom_types);
-    //     while (sqlite3_result_code == SQLITE_ROW) {
-    //       std::uint32_t compatible_end_atom_type = sqlite3_column_int64(select_compatible_atom_types, 0);
-    //       // Record the Connection compatibility.
-    //       compatible_connections.emplace(compatible_start_atom_type, compatible_end_atom_type, bond_type);
-    //       sqlite3_result_code = sqlite3_step(select_compatible_atom_types);
-    //     };
-    //     sqlite3_clear_bindings(select_compatible_atom_types);
-    //     sqlite3_reset(select_compatible_atom_types);
-    //   };
-    //   ++progress;
-    //   ++connection_it;
-    // };
-    // connection_it.Finalize();
-    // sqlite3_finalize(select_compatible_atom_types);
   // If the stringency level is 2 only the mirrored Connection is considered
   // to be compatible.
   } else if (stringency == 2) {

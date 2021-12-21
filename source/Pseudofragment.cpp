@@ -921,13 +921,6 @@ RDKit::RWMol SanitizePseudomol(const RDKit::RWMol& pseudomol, const ConnectionsT
 
 // Class Pseudofragment
 Pseudofragment::Pseudofragment() = default;
-// Pseudofragment::Pseudofragment(const RDKit::ROMol& pmol, const ConnectionsTable& cs,
-//   const std::string& sml, bool hr, bool rp) :
-//   pseudomol(pmol),
-//   connections(cs),
-//   smiles(sml),
-//   has_ring(hr),
-//   ring_part(rp) {};
 Pseudofragment::Pseudofragment(const RDKit::RWMol& pmol, const ConnectionsTable& cs,
   const std::string& sml, bool hr, bool rp) :
   pseudomol(pmol),

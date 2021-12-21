@@ -1218,7 +1218,6 @@ void SubstitutionPoint::PrepareHopcroftKarp(std::mt19937& prng) {
 };
 
 PATH SubstitutionPoint::HopcroftKarp(const MolBrick& substitute, ConnectionCompatibilities& compatibilities, std::mt19937& prng) {
-  // IMPROVE: Better BipartiteGraph construction.
   // Assign IDs to the Vertices that will represent the neighbor's
   // compatible Connections in the BipartiteGraph.
   assert(hopcroft_ready);
@@ -2814,7 +2813,6 @@ bool ReconstructedMol::InternalExpansion(const PseudofragmentDB& database, Conne
   // the insert MolBrick - Neighboring MolBrick Connections relationships.
   // These will be the Edges. Note that herein the InsertionPoint's owner MolBrick
   // is also considered a neighbor.
-  // IMPROVE: Better BipartiteGraph construction.
   std::vector<std::pair<int, int>> edges;
   std::map<int, MolBrick*> vtx_ids_neighbors;
   std::map<MolBrick*, int> neighbors_vtx_ids;
@@ -3629,12 +3627,10 @@ bool ReconstructedMol::Substitution(const std::string& location, const Pseudofra
 
   // Determine how the substitute MolBrick should connect to the neighboring
   // MolBricks by finding a solution to the Maximum Bipartite Matching problem.
-
   // First, create maps correlating MolBricks/ConnectionPoints to integer IDs.
   // These will be the IDs of the BipartiteGraph's Vertices.
   // Secondly, define the Substitute MolBrick - Neighboring MolBrick
   // Connections relationships. These will be the Edges.
-  // IMPROVE: Better BipartiteGraph construction.
   std::vector<std::pair<int, int>> edges;
   std::map<int, const MolBrick*> vtx_ids_neighbors;
   std::map<const MolBrick*, int> neighbors_vtx_ids;
@@ -4007,7 +4003,6 @@ bool ReconstructedMol::Transfection(const std::string& location, ConnectionQuery
   // Update the pseudomol. This entails removing the atoms of the MolBrick
   // to be substituted, adding the atoms of the new substitute MolBrick and
   // reestablishing the bonds between them.
-
   // Remove the atoms of the substituted MolBrick in sorted descending order
   // to avoid atom reindexing.
   std::vector<unsigned> substituted_mutable_atom_indices = GetMutableAtomIndices(pseudomol, substituted->atom_indices);
@@ -4154,8 +4149,6 @@ bool ReconstructedMol::Transfection(const std::string& location, ConnectionQuery
   sanitized_smiles_updated = false;
   fingerprint_updated = false;
   stereo_updated = false;
-
-  // IMPROVE: Move operator to insert substitute in bricks?
   bricks[brick_schematic_idx] = substitute;
 
   // If any chiral centers or stereochemical double bonds have unspecified
