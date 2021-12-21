@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.15)
 # Define the project.
 project(LEADD
   LANGUAGES CXX
-  VERSION 2.0.0
+  VERSION 3.0.0
   DESCRIPTION "Lamarckian Evolutionary Algorithm for de novo Drug Design"
   HOMEPAGE_URL "https://github.com/UAMCAntwerpen/LEADD"
 )
@@ -162,6 +162,12 @@ target_link_libraries(InspectConnectionQueryResults
   boost_program_options
 )
 
+add_executable(BinAtomPairFrequencies ${LEADD_SOURCE_DIR}/BinAtomPairFrequencies.cpp)
+target_link_libraries(BinAtomPairFrequencies
+  ConnectionQueryResults
+  boost_program_options
+)
+
 add_executable(MakeFeatureLibrary ${LEADD_SOURCE_DIR}/MakeFeatureLibrary.cpp)
 target_link_libraries(MakeFeatureLibrary
   SAScore
@@ -217,6 +223,7 @@ install(
     MakeFragmentSimilarityMatrix
     PrecalculateConnectionQueryResults
     InspectConnectionQueryResults
+    BinAtomPairFrequencies
     MakeFeatureLibrary
     CalculateSAScore
     StandaloneLEADD
