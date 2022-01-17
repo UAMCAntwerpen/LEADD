@@ -24,7 +24,7 @@ def ParseArgs():
         help="Path to a LEADD settings file.")
     parser.add_argument("output", type=str,
         help="Path to a directory where LEADD's output is stored.")
-    parser.add_argument("-r", "--reference", type=str, default="CN1CCN(CCNc2nc3cc(Cl)c(cc3nc2NCCN2CCN(C)CC2)C#CCCO)CC1",
+    parser.add_argument("-r", "--reference", type=str, default="CCNc1nc2cc(OC)c(Cl)cc2nc1-c1cccc(C(=O)NCc2ccccc2)c1",
         help="SMILES of the reference molecule used for scoring.")
     parser.add_argument("-v", "--verbose", action="store_true",
         help="Flag to print the progress of the evolution.")
