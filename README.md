@@ -7,6 +7,9 @@ Molecules are represented as meta-graphs of molecular fragments. Fragments are e
 A more detailed description of the algorithm can be found in the corresponding paper:
 [Kerstjens, A., De Winter, H. LEADD: Lamarckian evolutionary algorithm for de novo drug design. J Cheminform 14, 3 (2022). https://doi.org/10.1186/s13321-022-00582-y](https://doi.org/10.1186/s13321-022-00582-y).
 
+## Authors
+* Alan Kerstjens (https://github.com/alankerstjens)
+
 ## Dependencies
 * [CMake](https://cmake.org/) (>= 3.15)
 * [C++17](https://isocpp.org/) and [OpenMP 4.0](https://www.openmp.org/) compliant compiler
