@@ -31,9 +31,9 @@ class ReconstructionSettings {
 
   unsigned prng_seed = 0;
 
-  float n_ring_atoms_mean = 12.0f;
-  float n_ring_atoms_stdev = 6.0f;
-  unsigned max_n_ring_atoms = 24u;
+  float n_ring_atoms_mean = 18.0f;
+  float n_ring_atoms_stdev = 9.0f;
+  unsigned max_n_ring_atoms = 36u;
   float peak_n_ring_atoms_probability = 0.7f;
 
   float ring_size_mean = 6.0f;

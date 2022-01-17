@@ -13,14 +13,14 @@ public:
   enum class SystematicFragmentation {NONE, LINEAR, SUBGRAPH, CIRCULAR};
 
 private:
-  AtomTyping atom_typing = AtomTyping::MMFF;
-  SystematicFragmentation systematic_fragmentation = SystematicFragmentation::SUBGRAPH;
+  AtomTyping atom_typing = AtomTyping::MORGAN;
+  SystematicFragmentation systematic_fragmentation = SystematicFragmentation::NONE;
 
-  unsigned min_fragment_size = 0, max_fragment_size = 2;
+  unsigned min_fragment_size = 0, max_fragment_size = 0;
 
   bool fragment_rings = false;
 
-  unsigned morgan_radius = 2;
+  unsigned morgan_radius = 1;
   bool morgan_consider_chirality = false;
   unsigned hashed_morgan_n_bits = 2048;
 
