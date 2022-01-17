@@ -4,7 +4,11 @@ LEADD (Lamarckian Evolutionary Algorithm for *de novo* Drug Design) is a tool fo
 
 Molecules are represented as meta-graphs of molecular fragments. Fragments are extracted by fragmenting an input virtual library, and broken bonds are converted to labelled attachment points (a.k.a. connectors). Molecules are reassembled by genetic operators that combine fragments through said connectors. Knowledge-based connectivity rules, extracted from the same input library, are enforced throughout the process. A population of molecules is evolved stochastically through use of genetic operators, with the goal of optimizing a user-provided scoring function. A Lamarckian evolutionary mechanism adjusts the reproductive behaviour of the molecules based on the outcome of the previous generation.
 
-A more detailed description of the algorithm will be made available in a future paper.
+A more detailed description of the algorithm can be found in the corresponding paper:
+[Kerstjens, A., De Winter, H. LEADD: Lamarckian evolutionary algorithm for de novo drug design. J Cheminform 14, 3 (2022). https://doi.org/10.1186/s13321-022-00582-y](https://doi.org/10.1186/s13321-022-00582-y).
+
+## Authors
+* Alan Kerstjens (https://github.com/alankerstjens)
 
 ## Dependencies
 * [CMake](https://cmake.org/) (>= 3.15)
@@ -43,25 +47,22 @@ cmake -DRDKit_INCLUDE_DIRS=${RDBASE}/Code -DRDKit_LIBRARY_DIRS=${RDBASE}/lib -DB
 For optimal performance, advanced users should consider specifying the CPU architecture and other optimization compiler flags in the CMake command with the `CMAKE_CXX_FLAGS`.
 
 ## Example workflow
-This section assumes you have installed LEADD on a Linux system and that the environment variable `${LEADD}` points to LEADD's root directory. If you'd like to follow along you can find most referenced files in the [example directory](example).
+This section assumes you have installed LEADD on a Linux system and that the environment variable `${LEADD}` points to LEADD's root directory. If you'd like to follow along you can find most referenced files in the [example directory](example). Most executables are parallelized with OpenMP and will by default use all cores of your CPU. You can change this behaviour by setting the `OMP_NUM_THREADS` environment variable before running the command.
 
-The first step is to create the fragments' SQLite3 database. In this example we will fragment [`PGK1_ligands.smi`](example/PGK1_ligands.smi), splitting acyclic regions into atomic fragments (`-x 0`). `Fragment` is parallelized with OpenMP and will by default use all cores of your CPU. You can change this behaviour by setting the `OMP_NUM_THREADS` environment variable before running the command.
+The first step is to create the fragments' SQLite3 database. In this example we will fragment [`PGK1_ligands.smi`](example/PGK1_ligands.smi), splitting acyclic regions into atomic fragments and defining connectors with MMFF94 atom types.
 
 ```bash
 cd ${LEADD}/example
-${LEADD}/bin/Fragment -i PGK1_ligands.smi -o fragments.db -x 0
+${LEADD}/bin/Fragment -i PGK1_ligands.smi -o fragments.db -s fragmentation_settings.txt
 ```
 
-Thereafter, we precompute which fragments are compatible with each connector. Here you can choose which compatibility definition you'd like to use by specifying the `--stringency` argument. For more information on these definitions please refer to the paper.
-* `-s 0`: Use a simple valence model
-* `-s 1`: Use the lax compatibility definition
-* `-s 2`: Use the strict compatibility definition
+Thereafter, we precompute which fragments are compatible with each connector and store the output in a file.
 
 ```bash
-${LEADD}/bin/PrecalculateConnectionQueryResults -i fragments.db -o fragments.cqr -t settings.txt -s 1
+${LEADD}/bin/PrecalculateConnectionQueryResults -i fragments.db -o fragments.cqr -t reconstruction_settings.txt
 ```
 
-If you want to enable guided evolution you will need to generate a fragments similarity matrix. You can set `OMP_NUM_THREADS` to adjust the parallelism of the process. If your fragments database is very large, think twice before creating this matrix as it [can be very expensive!](#What-should-I-consider-when-selecting-input-molecules-to-create-the-fragments-database).
+If you want to enable guided evolution you will need to generate a fragments similarity matrix. If your fragments database is very large, think twice before creating this matrix as it [can be very expensive!](#What-should-I-consider-when-selecting-input-molecules-to-create-the-fragments-database)
 
 ```bash
 ${LEADD}/bin/MakeFragmentSimilarityMatrix -i fragments.db -o fragments.h5
@@ -73,28 +74,50 @@ If you would like to use the [SAScore](https://www.ncbi.nlm.nih.gov/pmc/articles
 ${LEADD}/bin/MakeFeatureLibrary -i CHEMBL.smi -o CHEMBL.fl
 ```
 
-Now you are ready to run LEADD itself. Make sure the absolute paths to the files we just created are within your `settings.txt` file. You'll have to [adapt](#Settings) the [provided settings file](example/settings.txt) a bit.
+Now you are ready to run LEADD itself. Make sure the absolute paths to the files we just created are within your `reconstruction_settings.txt` file. You'll have to [adapt](#Settings) the [provided settings file](example/reconstruction_settings.txt) a bit.
 
-If you are using LEADD programatically with the Python bindings, you should place your Python script in the same directory as the `pyLEADD` library (`${LEADD}/lib`). The [provided example script](example/leadd_example.py) will attempt to rediscover [one of the ligands we just fragmented](example/CHEMBL3732863.smi):
+If you are using LEADD programatically with the Python bindings make sure your Python interpreter can find the LEADD shared library, for instance by adding `${LEADD}/lib` to your `${PYTHONPATH}`. The [provided example script](example/leadd_example.py) will attempt to rediscover [one of the ligands we just fragmented](example/CHEMBL3732863.smi):
 
 ```bash
-python ${LEADD}/lib/leadd_example.py settings.txt . -v
+python ${LEADD}/lib/leadd_example.py reconstruction_settings.txt . -v
 ```
 
 Alternatively, you can run LEADD as a standalone executable. Normally this requires [coupling a scoring function](#Scoring-settings). For this example we can use the included topological similarity scoring function to rediscover [the same ligand](example/CHEMBL3732863.smi):
 
 ```bash
-${LEADD}/bin/StandaloneLEADD -s settings.txt -o .
+${LEADD}/bin/StandaloneLEADD -s reconstruction_settings.txt -o . -v
 ```
 
 Remember that LEADD is a stochastic algorithm. Try running it a couple of times to see what happens.
 
 ## Settings
-This section covers how you can configure LEADD through its settings file. A [template settings file](example/settings.txt) is provided with this distribution. For default setting values users should reference the [source code](source/ReconstructionSettings.hpp). For an executable's options run it from the command line with the `--help` flag.
+This section covers how you can configure LEADD through its settings files. For an executable's options run it from the command line with the `--help` flag.
 
-The settings file is a plain text file where each line consists of a `KEY VALUE` pair separated by a single space. Most `KEY`s are optional. If an optional `KEY` is omitted or if the `VALUE` is blank LEADD will use a default `VALUE` instead. If the `KEY` is required by the executable LEADD will throw an error. Unless otherwise specified, a `KEY` should be assumed to be optional. It's recommended to specify all `KEY`s, including optional ones, to avoid unexpected behaviour. Empty lines and lines starting with `#` aren't parsed.
+The settings files are plain text files where each line consists of a `KEY VALUE` pair separated by a single space. Most `KEY`s are optional. If an optional `KEY` is omitted or if the `VALUE` is blank LEADD will use a default `VALUE` instead (see source code). If the `KEY` is required by the executable LEADD will throw an error. Unless otherwise specified, a `KEY` should be assumed to be optional. It's recommended to specify all `KEY`s, including optional ones, to avoid unexpected behaviour. Empty lines and lines starting with `#` aren't parsed.
 
-### Input file settings
+### Fragmentation settings
+A template [fragmentation settings file](example/fragmentation_settings.txt) is provided with this distribution. For default setting values users should reference the [source code](source/FragmentationSettings.hpp).
+
+| Key | Type | Valid values | Description |
+|:---:|:----:|:------------:|:-----------:|
+| `ATOM_TYPING_SCHEME` | Enum | `DUMMY`, `ATOMIC_NUMBER`, `MMFF`, `MORGAN`, `HASHED_MORGAN` | Atom typing scheme used to define connections |
+| `SYSTEMATIC_FRAGMENTATION_SCHEME` | Enum | `NONE`, `LINEAR`, `SUBGRAPH`, `CIRCULAR` | Fragmentation scheme for molecular regions treated systematically (normally acyclic regions) |
+| `MIN_FRAGMENT_SIZE` | Integer | >= 0 | Minimum systematic fragment size (in number of heavy atoms). Only used when `SYSTEMATIC_FRAGMENTATION_SCHEME != NONE` |
+| `MAX_FRAGMENT_SIZE` | Integer | >= 0 && >= `MIN_FRAGMENT_SIZE` | Maximum systematic fragment size (in number of heavy atoms). Only used when `SYSTEMATIC_FRAGMENTATION_SCHEME != NONE` |
+| `FRAGMENT_RINGS` | Boolean | 0 or 1 | Flag to fragment cyclic regions systematically. *For testing purposes only* |
+
+#### Morgan atom typing settings
+| Key | Type | Valid values | Description |
+|:---:|:----:|:------------:|:-----------:|
+| `MORGAN_RADIUS` | Integer | >= 0 | Circular atomic environment radius used to define Morgan atom types. Only used when `ATOM_TYPING_SCHEME == MORGAN` or `ATOM_TYPING_SCHEME == HASHED_MORGAN` |
+| `MORGAN_CONSIDER_CHIRALITY` | Boolean | 0 or 1 | Flag to use atom chirality as atomic invariant during Morgan atom type calculation. Only used when `ATOM_TYPING_SCHEME == MORGAN` or `ATOM_TYPING_SCHEME == HASHED_MORGAN` |
+| `HASHED_MORGAN_N_BITS` | Integer | > 0 | Modulo used to collapse raw Morgan feature IDs into Morgan atom types. Only used when `ATOM_TYPING_SCHEME == HASHED_MORGAN` |
+
+
+### Reconstruction settings
+A template [reconstruction settings file](example/reconstruction_settings.txt) is provided with this distribution. For default setting values users should reference the [source code](source/ReconstructionSettings.hpp).
+
+#### Input file settings
 These settings are **required** by LEADD.
 
 | Key | Type | Valid values | Description |
@@ -102,7 +125,7 @@ These settings are **required** by LEADD.
 | `FRAGMENT_DATABASE_FILE` | String | Absolute paths | Path to the SQLite3 database generated by `Fragment`|
 | `CONNECTION_QUERY_RESULTS_FILE` | String | Absolute paths | Path to the `.cqr` generated by `PrecalculateConnectionQueryResults`|
 
-### Fragment sampling settings
+#### Fragment sampling settings
 
 | Key | Type | Valid values | Description |
 |:---:|:----:|:------------:|:-----------:|
@@ -110,33 +133,33 @@ These settings are **required** by LEADD.
 | `ACYCLIC_LEVEL_GAMMA` | Float | Any | Exponent applied to acyclic fragment sizes when calculating their sampling weight |
 | `RING_FREQUENCY_GAMMA` | Float | Any | Exponent applied to cyclic fragment frequencies when calculating their sampling weight |
 | `RING_LEVEL_GAMMA` | Float | Any | Exponent applied to cyclic fragment sizes when calculating their sampling weight |
-| `SCORE_GAMMA` | Float | Any | Exponent applied to molecules' scores when calculating fragment sampling weights in transfections and parent sampling weights  |
+| `SCORE_GAMMA` | Float | Any | Exponent applied to molecules' scores when calculating fragment sampling weights in transfections and parent sampling weights |
 
-### Genetic operation probabilities
+#### Genetic operation probabilities
 | Key | Type | Valid values | Description |
 |:---:|:----:|:------------:|:-----------:|
 | `PERIPHERAL_EXPANSION_PROBABILITY` | Integer | >= 0 | Sampling weight of the peripheral expansion operator |
 | `PERIPHERAL_DELETION_PROBABILITY` | Integer | >= 0 | Sampling weight of the peripheral deletion operator |
 | `PERIPHERAL_SUBSTITUTION_PROBABILITY` | Integer | >= 0 | Sampling weight of the peripheral substitution operator |
-| `PERIPHERAL_CROSSOVER_PROBABILITY` | Integer | >= 0 | Sampling weight of the peripheral transfection operator |
+| `PERIPHERAL_TRANSFECTION_PROBABILITY` | Integer | >= 0 | Sampling weight of the peripheral transfection operator |
 | `INTERNAL_EXPANSION_PROBABILITY` | Integer | >= 0 | Sampling weight of the internal expansion operator |
 | `INTERNAL_DELETION_PROBABILITY` | Integer | >= 0 | Sampling weight of the internal deletion operator |
 | `INTERNAL_SUBSTITUTION_PROBABILITY` | Integer | >= 0 | Sampling weight of the internal substitution operator |
-| `INTERNAL_CROSSOVER_PROBABILITY` | Integer | >= 0 | Sampling weight of the internal transfection operator |
+| `INTERNAL_TRANSFECTION_PROBABILITY` | Integer | >= 0 | Sampling weight of the internal transfection operator |
 | `TRANSLATION_PROBABILITY` | Integer | >= 0 | Sampling weight of the translation operator |
 | `STEREO_FLIP_PROBABILITY` | Integer | >= 0 | Sampling weight of the stereo flip operator |
 
-### Designed molecule settings
+#### Designed molecule settings
 | Key | Type | Valid values | Description |
 |:---:|:----:|:------------:|:-----------:|
 | `N_RING_ATOMS_MEAN` | Integer | > 0 | Mean number of ring atoms in designed molecules |
 | `N_RING_ATOMS_STDEV` | Float | > 0 | Standard deviation in the number of ring atoms in designed molecules |
-| `PEAK_N_RING_ATOMS_PROBABILITY` | Float | 0 < v < 1 | Probability of keeping the number of ring atoms constant at `N_RING_ATOMS_MEAN` |
 | `MAX_N_RING_ATOMS` | Integer | > 0 | Maximum allowed number of ring atoms |
+| `PEAK_N_RING_ATOMS_PROBABILITY` | Float | 0 < v < 1 | Probability of keeping the number of ring atoms constant at `N_RING_ATOMS_MEAN` |
 | `MIN_SEED_SIZE` | Integer | > 0 | Minimum number of heavy atoms in random starting molecules |
 | `ASSIGN_UNSPECIFIED_STEREO` | Boolean | 0 or 1 | Flag to assign random stereochemistry to unspecified chiral centers and stereochemical double bonds |
 
-### Evolution settings
+#### Evolution settings
 | Key | Type | Valid values | Description |
 |:---:|:----:|:------------:|:-----------:|
 | `PRNG_SEED` | Integer | >= 0 | Pseudo-random number generator seed. `0` is reserved for random seeds |
@@ -150,7 +173,7 @@ These settings are **required** by LEADD.
 | `MAX_GENERATIONS_STUCK` | Integer | >= 0 | Maximum number of generations without improvement in the `TERMINATION_SCORE` |
 | `MAX_ATTEMPTS_PER_GENERATION` | Integer | >= 0 | Maximum number of attempts at evolving a molecule before it's skipped |
 
-### Synthetic accessibility settings
+#### Synthetic accessibility settings
 The SAScore filter will be employed if the `FEATURE_LIBRARY_FILE` is specified and `MAX_SASCORE < 10`. The SAScore heuristic will be employed if `FEATURE_LIBRARY_FILE` is specified and `USE_SASCORE_HEURISTIC == 1`. Both can be used simultaneously.
 
 | Key | Type | Valid values | Description |
@@ -161,7 +184,7 @@ The SAScore filter will be employed if the `FEATURE_LIBRARY_FILE` is specified a
 | `SASCORE_HEURISTIC_SIGMA` | Float | > 0 | Parameter of the SAScore heuristic Gaussian function |
 | `USE_SASCORE_HEURISTIC` | Boolean | 0 or 1 | Flag to enable the SAScore heuristic |
 
-### Guided evolution settings
+#### Guided evolution settings
 Guided evolution will be enabled when `SIMILARITY_MATRIX_FILE` is specified and at least one of `ACYCLIC_POSITIVE_REINFORCEMENT`, `ACYCLIC_NEGATIVE_REINFORCEMENT`, `RING_POSITIVE_REINFORCEMENT` or `RING_NEGATIVE_REINFORCEMENT` are > 0.
 
 | Key | Type | Valid values | Description |
@@ -174,7 +197,7 @@ Guided evolution will be enabled when `SIMILARITY_MATRIX_FILE` is specified and 
 | `RING_POSITIVE_REINFORCEMENT` | Float | >= 0 | Reinforcement factor when increasing cyclic fragments sampling weights |
 | `RING_NEGATIVE_REINFORCEMENT` | Float | >= 0 | Reinforcement factor when decreasing cyclic fragments sampling weights |
 
-### Restart settings
+#### Restart settings
 By default LEADD generates a random starting population. Alternatively, users may specify their own starting populations. This can be done in two ways:
 * Programatically with the `LEADD::SetPopulation` function. This can be done with both the [C++](source/LEADD.hpp) and [Python](source/pyLEADD.cpp) APIs.
 * By specifying a `.rst` `RESTART_INPUT_FILE`.
@@ -193,7 +216,7 @@ However, the user should be aware of the limitations of the latter two approache
 | `RESTART_OUTPUT_FILE` | String | Absolute paths | Path to an output `.rst` file written by LEADD |
 | `N_GENERATIONS_PER_SAVE` | Integer | > 0 | Number of generations between writing a `.rst` file |
 
-### Scoring settings
+#### Scoring settings
 LEADD comes out of the box with a topological similarity scoring function which will be employed if only `TEMPLATE_MOL_SMILES` is specified. This scoring function should only be used for testing purposes. For real drug discovery projects you should couple your own scoring function. The recommended way of doing this is programatically. A Python [example](example/leadd_example.py) of this can be found in this repository.
 
 As a legacy way, you can also use the `StandaloneLEADD` executable. In this case, you must specify in the settings file `SCORING_FUNCTION_INPUT_FILE`, `SCORING_FUNCTION_CALL` and `SCORES_OUTPUT_FILE`, and make sure that your scoring function reads and writes files with the correct format. I strongly discourage this use because it can put some strain on the file system. More importantly, **the scoring function is evaluated as a shell command as is, posing a significant security risk! The user is responsible for making sure this isn't abused.**
@@ -206,7 +229,7 @@ As a legacy way, you can also use the `StandaloneLEADD` executable. In this case
 | `TEMPLATE_MOL_SMILES` | String | SMILES | SMILES of the reference molecule used by LEADD's topological similarity scoring function |
 | `SCORE_FIRST_POPULATION` | Boolean | 0 or 1 | Flag to score the randomly generated/read population |
 
-### Reporting settings
+#### Reporting settings
 LEADD can write out some statistics to CSVs and generate SVGs of the molecules over time. These settings are intended mostly for debugging purposes.
 | Key | Type | Valid values | Description |
 |:---:|:----:|:------------:|:-----------:|
