@@ -7,9 +7,23 @@ PYBIND11_MAKE_OPAQUE(std::list<ReconstructedMol>)
 PYBIND11_MODULE(pyLEADD, module) {
   module.doc() = "Lamarckian Evolutionary Algorithm for de novo Drug Design";
 
-  pybind11::class_<ReconstructionSettings>(module, "LEADDSettings")
+  pybind11::class_<FragmentationSettings>(module, "FragmentationSettings")
+    .def(pybind11::init<const std::string&>(),
+         pybind11::arg("settings_file_path"))
+    .def("SetAtomTyping", &FragmentationSettings::SetAtomTyping)
+    .def("SetSystematicFragmentation", &FragmentationSettings::SetSystematicFragmentation)
+    .def("SetMinFragmentSize", &FragmentationSettings::SetMinFragmentSize)
+    .def("SetMaxFragmentSize", &FragmentationSettings::SetMaxFragmentSize)
+    .def("SetFragmentRings", &FragmentationSettings::SetFragmentRings)
+    .def("SetMorganRadius", &FragmentationSettings::SetMorganRadius)
+    .def("SetMorganConsiderChirality", &FragmentationSettings::SetMorganConsiderChirality)
+    .def("SetHashedMorganNBits", &FragmentationSettings::SetHashedMorganNBits)
+    .def("Print", &FragmentationSettings::Print);
+
+  pybind11::class_<ReconstructionSettings>(module, "ReconstructionSettings")
     .def(pybind11::init<const std::string&, bool>(),
          pybind11::arg("settings_file_path"), pybind11::arg("check_paths") = true)
+    .def("GetPRNGSeed", &ReconstructionSettings::GetPRNGSeed)
     .def("SetPRNGSeed", &ReconstructionSettings::SetPRNGSeed)
     .def("SetNRingAtomsMean", &ReconstructionSettings::SetNRingAtomsMean)
     .def("SetNRingAtomsSTDEV", &ReconstructionSettings::SetNRingAtomsSTDEV)
@@ -40,12 +54,12 @@ PYBIND11_MODULE(pyLEADD, module) {
     }, pybind11::keep_alive<0, 1>());
 
   module.def("MakePopulationFromSMILES", &MakePopulationFromSMILES,
-             pybind11::arg("population_smiles"), pybind11::arg("fragment_rings") = false,
+             pybind11::arg("population_smiles"), pybind11::arg("fragmentation_settings"),
              pybind11::return_value_policy::move);
 
   pybind11::class_<LEADD>(module, "LEADD")
     .def(pybind11::init<ReconstructionSettings, const std::string&>(),
-         pybind11::arg("settings"), pybind11::arg("output_directory_path"))
+         pybind11::arg("reconstruction_settings"), pybind11::arg("output_directory_path"))
     .def("TerminationCriteriaMet", &LEADD::TerminationCriteriaMet)
     .def("GenerateChildren", &LEADD::GenerateChildren)
     .def("SelectivePressure", &LEADD::SelectivePressure)
@@ -54,10 +68,13 @@ PYBIND11_MODULE(pyLEADD, module) {
     .def("WriteOperationFrequenciesToReport", &LEADD::WriteOperationFrequenciesToReport)
     .def("SetPopulation", &LEADD::SetPopulation,
          pybind11::arg("population"), pybind11::arg("reset_weights") = true)
+    .def("SavePopulation",
+         pybind11::overload_cast<const std::string&>(&LEADD::SavePopulation, pybind11::const_),
+         pybind11::arg("output_file_path"))
     .def("GetPopulation", &LEADD::GetPopulation,
          pybind11::return_value_policy::reference_internal)
     .def("GetBestIndividual", &LEADD::GetBestIndividual,
-        pybind11::return_value_policy::reference_internal)
+         pybind11::return_value_policy::reference_internal)
     .def("GetGenerationNumber", &LEADD::GetGenerationNumber)
     .def("GetBestScore", &LEADD::GetBestScore)
     .def("GetSettings", &LEADD::GetSettings)

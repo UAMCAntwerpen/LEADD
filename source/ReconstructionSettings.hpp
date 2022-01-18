@@ -15,27 +15,25 @@ class ReconstructionSettings {
   std::string connection_query_results_file;
 
   std::unordered_map<std::string, float> gammas{
-    {"acyclic_frequency", 1.0f}, {"acyclic_level", 0.0f},
-    {"ring_frequency",  1.0f},   {"ring_level",    0.0f},
+    {"acyclic_frequency", 1.0f}, {"acyclic_size", 0.0f},
+    {"ring_frequency",  1.0f},   {"ring_size",    0.0f},
     {"score", 2.5f}
   };
 
   std::unordered_map<std::string, unsigned> probabilities{
     {"peripheral_expansion", 4u},     {"peripheral_deletion", 4u},
-    {"peripheral_substitution", 28u}, {"peripheral_crossover", 10u},
+    {"peripheral_substitution", 28u}, {"peripheral_transfection", 10u},
     {"internal_expansion", 4u},       {"internal_deletion", 4u},
-    {"internal_substitution", 28u},   {"internal_crossover", 10u},
+    {"internal_substitution", 28u},   {"internal_transfection", 10u},
     {"translation", 4u},              {"stereo_flip", 0u},
-    {"cyclization", 0u},              {"ring_expansion", 0u},
-    {"ring_deletion", 0u},            {"ring_substitution", 0u},
-    {"ring_crossover", 0u},           {"ring_translation", 0u}
+    {"cyclization", 0u}
   };
 
   unsigned prng_seed = 0;
 
-  float n_ring_atoms_mean = 12.0f;
-  float n_ring_atoms_stdev = 6.0f;
-  unsigned max_n_ring_atoms = 24u;
+  float n_ring_atoms_mean = 18.0f;
+  float n_ring_atoms_stdev = 9.0f;
+  unsigned max_n_ring_atoms = 36u;
   float peak_n_ring_atoms_probability = 0.7f;
 
   float ring_size_mean = 6.0f;
@@ -112,9 +110,9 @@ public:
   const std::string& GetConnectionQueryResultsFile() const;
 
   float GetAcyclicFrequencyGamma() const;
-  float GetAcyclicLevelGamma() const;
+  float GetAcyclicSizeGamma() const;
   float GetRingFrequencyGamma() const;
-  float GetRingLevelGamma() const;
+  float GetRingSizeGamma() const;
   float GetScoreGamma() const;
 
   unsigned GetOperationProbability(const std::string& operation) const;

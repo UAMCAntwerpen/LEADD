@@ -2,15 +2,16 @@
 #ifndef _LEADD_HPP_
 #define _LEADD_HPP_
 
+#include <GraphMol/SmilesParse/SmilesParse.h>
 #include <boost/serialization/list.hpp>
 #include "Reconstruction.hpp"
 #include "SAScore.hpp"
 
 class LEADD {
 private:
+  std::string output_directory_path;
   ReconstructionSettings settings;
-  sqlite3* database;
-  sqlite3_stmt* select_fragment_by_id;
+  PseudofragmentDB database;
   ConnectionQueryResults query_results;
   FeatureLibrary feature_library;
   SAScoreHeuristic sascore_heuristic;
@@ -25,7 +26,7 @@ private:
 
   unsigned generation_n = 0;
   unsigned n_scoring_calls = 0;
-  float best_score = 0;
+  float best_score = 0.0;
   unsigned n_generations_stuck = 0;
   unsigned max_individual_id = 0;
 
@@ -49,9 +50,9 @@ public:
   void GrowIndividuals();
   void InitializeRandomPopulation();
   void SetPopulation(const std::list<ReconstructedMol>& new_population, bool reset_weights = true);
-  void SetPopulationFromSMILES(const std::vector<std::string>& new_population_smiles);
   void LoadPopulation();
   void SavePopulation() const;
+  void SavePopulation(const std::string& file_path) const;
   void WritePopulationSMILES(const std::string& file_path);
 
   unsigned GenerateChildren();
@@ -74,6 +75,6 @@ public:
   EvolutionReport& GetReport();
 };
 
-std::list<ReconstructedMol> MakePopulationFromSMILES(const std::vector<std::string>& population_smiles, bool fragment_rings = false);
+std::list<ReconstructedMol> MakePopulationFromSMILES(const std::vector<std::string>& population_smiles, const FragmentationSettings& settings);
 
 #endif

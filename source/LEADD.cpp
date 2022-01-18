@@ -1,12 +1,9 @@
 #include "LEADD.hpp"
 
 LEADD::LEADD(const ReconstructionSettings& settings, const std::string& output_directory_path) :
-  settings(settings) {
-  // Open a connection to the SQLite3 database containing the fragments.
-  sqlite3_open(settings.GetFragmentDatabaseFile().c_str(), &database);
-  // Prepare a SQLite3 statement to retrieve Pseudofragments by ID.
-  sqlite3_prepare_v2(database, "SELECT pickle, pickle_size FROM pseudofragments WHERE id = ?", -1, &select_fragment_by_id, NULL);
-
+  settings(settings),
+  output_directory_path(output_directory_path),
+  database(settings.GetFragmentDatabaseFile()) {
   // Deserialize the file containing precalculated ConnectionQueryResults.
   std::ifstream cqr_stream(settings.GetConnectionQueryResultsFile(), std::ifstream::binary);
   boost::archive::binary_iarchive cqr_archive (cqr_stream);
@@ -75,7 +72,14 @@ LEADD::LEADD(const ReconstructionSettings& settings, const std::string& output_d
   parent_indices.reserve(settings.GetNChildrenPerGeneration());
 
   // Store the highest ID assigned to a ReconstructedMol.
-  max_individual_id = population.back().GetID();
+  unsigned max_id = 0;
+  for (const ReconstructedMol& individual : population) {
+    unsigned individual_id = individual.GetID();
+    if (individual_id > max_id) {
+      max_id = individual_id;
+    };
+  };
+  max_individual_id = max_id;
 };
 
 void LEADD::MakePopulationTakeBrickOwnership() {
@@ -92,70 +96,40 @@ void LEADD::AssignConnectorWeightsToPopulation() {
 
 void LEADD::SeedPopulation() {
   // Verify that the population is empty.
-  assert(population.empty());
-  // Prepare the general SQLite3 statement.
-  sqlite3_stmt* select_fragment_info;
-  sqlite3_prepare_v2(database, "SELECT id, level, frequency FROM pseudofragments WHERE has_ring = ? AND ring_part = ?", -1, &select_fragment_info, NULL);
-  // Initialize the objects to store the Pseudofragment IDs and weights.
-  PseudofragmentIDs ids;
-  PseudofragmentWeights weights;
-  // Extract the relevant settings from the ReconstructionSettings.
-  float acyclic_freq_gamma = settings.GetAcyclicFrequencyGamma();
-  float acyclic_level_gamma = settings.GetAcyclicLevelGamma();
-  float ring_freq_gamma = settings.GetRingFrequencyGamma();
-  float ring_level_gamma = settings.GetRingLevelGamma();
-  // Select the acyclic Pseudofragments.
-  float level = 0, freq = 0;
-  sqlite3_bind_int(select_fragment_info, 1, 0);
-  sqlite3_bind_int(select_fragment_info, 2, 0);
-  int rc = sqlite3_step(select_fragment_info);
-  while (rc == SQLITE_ROW) {
-    ids.AddAcyclicID(sqlite3_column_int64(select_fragment_info, 0));
-    level = static_cast<float>(sqlite3_column_int(select_fragment_info, 1));
-    freq = static_cast<float>(sqlite3_column_int(select_fragment_info, 2));
-    weights.AddAcyclicWeight(std::pow(freq, acyclic_freq_gamma) * std::pow(level, acyclic_level_gamma));
-    rc = sqlite3_step(select_fragment_info);
-  };
-  sqlite3_clear_bindings(select_fragment_info);
-  sqlite3_reset(select_fragment_info);
-  // Select the Pseudofragments containing rings.
-  sqlite3_bind_int(select_fragment_info, 1, 1);
-  sqlite3_bind_int(select_fragment_info, 2, 0);
-  rc = sqlite3_step(select_fragment_info);
-  while (rc == SQLITE_ROW) {
-    ids.AddRingID(sqlite3_column_int64(select_fragment_info, 0));
-    level = static_cast<float>(sqlite3_column_int(select_fragment_info, 1));
-    freq = static_cast<float>(sqlite3_column_int(select_fragment_info, 2));
-    weights.AddRingWeight(std::pow(freq, ring_freq_gamma) * std::pow(level, ring_level_gamma));
-    rc = sqlite3_step(select_fragment_info);
-  };
-  sqlite3_clear_bindings(select_fragment_info);
-  sqlite3_reset(select_fragment_info);
-  sqlite3_finalize(select_fragment_info);
-  // Create the probability distributions for the retrieved Pseudofragment IDs
-  // based on their weights.
-  std::discrete_distribution<unsigned> acyclic_distribution(weights.GetAcyclicWeights().begin(), weights.GetAcyclicWeights().end());
-  std::discrete_distribution<unsigned> ring_distribution(weights.GetRingWeights().begin(), weights.GetRingWeights().end());
-  // Sample a ReconstuctedMol seed.
-  unsigned n_seeds = settings.GetNSeeds();
-  unsigned idx = 0, pseudofragment_id = 0;
-  float weight = 0;
-  for (unsigned seed_id = 1; seed_id <= n_seeds; ++seed_id) {
-    bool ring_seed = controller.DecideChange(0, prng);
-    if (ring_seed) {
-      idx = ring_distribution(prng);
-      pseudofragment_id = ids.GetRingIDs()[idx];
-      weight = weights.GetRingWeights()[idx];
-    } else {
-      idx = acyclic_distribution(prng);
-      pseudofragment_id = ids.GetAcyclicIDs()[idx];
-      weight = weights.GetAcyclicWeights()[idx];
+  population.clear();
+  // Create a ring Pseudofragment sampling distribution.
+  std::map<unsigned, float> candidate_pseudofragments;
+  for (const auto& [connection, query_results_by_connection_frequency] : query_results.GetStrictRingResults()) {
+    for (const auto& [connection_frequency, query_result] : query_results_by_connection_frequency) {
+      const auto& [pseudofragment_ids, pseudofragment_weights] = query_result;
+      for (size_t i = 0; i < pseudofragment_ids.size(); ++i) {
+        unsigned pseudofragment_id = pseudofragment_ids[i];
+        float pseudofragment_weight = pseudofragment_weights[i];
+        candidate_pseudofragments.insert({pseudofragment_id, pseudofragment_weight});
+      };
     };
-    Pseudofragment pseudofragment = GetPseudofragmentByIDFromDB(pseudofragment_id, select_fragment_by_id);
-    MolBrick brick(pseudofragment, pseudofragment_id, 0, 0, weight, nullptr);
-    ReconstructedMol reconstruction(brick);
+  };
+  std::vector<float> candidate_pseudofragment_weights;
+  candidate_pseudofragment_weights.reserve(candidate_pseudofragments.size());
+  for (auto [pseudofragment_id, pseudofragment_weight] : candidate_pseudofragments) {
+    candidate_pseudofragment_weights.push_back(pseudofragment_weight);
+  };
+  std::discrete_distribution<size_t> distribution (candidate_pseudofragment_weights.begin(), candidate_pseudofragment_weights.end());
+  // Sample N random Pseudofragments and convert them to ReconstructedMols.
+  for (unsigned seed_id = 1; seed_id <= settings.GetNSeeds(); ++seed_id) {
+    // Choose a ring Pseudofragment.
+    size_t pseudofragment_idx = distribution(prng);
+    std::map<unsigned, float>::const_iterator pseudofragment_it = candidate_pseudofragments.begin();
+    std::advance(pseudofragment_it, pseudofragment_idx);
+    unsigned pseudofragment_id = pseudofragment_it->first;
+    float pseudofragment_weight = pseudofragment_it->second;
+    // Fetch the chosen Pseudofragment from the database.
+    auto [pseudofragment, pseudofragment_frequency] = database.SelectPseudofragmentWithID(pseudofragment_id);
+    // Convert it to a ReconstructedMol.
+    MolBrick brick (pseudofragment, pseudofragment_id, 0, 0, pseudofragment_weight, nullptr);
+    population.emplace_back(brick); // Construct the ReconstructedMol in place.
+    ReconstructedMol& reconstruction = population.back();
     reconstruction.SetID(seed_id);
-    population.push_back(std::move(reconstruction));
   };
   // Allow the population's ReconstructedMols to take ownership of their MolBricks.
   MakePopulationTakeBrickOwnership();
@@ -168,9 +142,9 @@ void LEADD::SeedPopulation() {
 
 void LEADD::GrowIndividuals() {
   for (ReconstructedMol& reconstruction : population) {
-    while (reconstruction.GetLevel() < settings.GetMinSeedSize()) {
+    while (reconstruction.GetSize() < settings.GetMinSeedSize()) {
       if (!reconstruction.GetConnections().Empty()) {
-        reconstruction.PeripheralExpansion(select_fragment_by_id, query_results, controller, prng, settings.UsingGuidedEvolution(), settings.AssignUnspecifiedStereo());
+        reconstruction.PeripheralExpansion(database, query_results, controller, prng, settings.UsingGuidedEvolution(), settings.AssignUnspecifiedStereo());
       } else {
         break;
       };
@@ -179,8 +153,6 @@ void LEADD::GrowIndividuals() {
 };
 
 void LEADD::InitializeRandomPopulation() {
-  // Erase the current population.
-  population.clear();
   // Seed new individuals with a single random MolBrick.
   SeedPopulation();
   // Grow each individual up to the size specified by the ReconstructionSettings.
@@ -188,25 +160,28 @@ void LEADD::InitializeRandomPopulation() {
 };
 
 void LEADD::SetPopulation(const std::list<ReconstructedMol>& new_population, bool reset_weights) {
-  boost::format formatter("(%d, %d, %d)");
-  // When a population comes from outside sources we can't be certain that the
-  // Connections within the ReconstructedMols are also recorded in the ConnectionQueryResults.
-  // The ReconstructedMols with unknown Connections are skipped, since our operators
-  // can't handle them.
   unsigned id = 1;
   std::list<ReconstructedMol> valid_population;
   for (const ReconstructedMol& individual : new_population) {
-    std::pair<Connection, bool> connection_known = individual.HasKnownConnections(query_results);
-    if (connection_known.second) {
-      if (id > max_individual_id) {
-        max_individual_id = id;
-      };
-      valid_population.push_back(individual);
-      valid_population.back().SetID(id++);
-    } else {
-      connection_known.first.GenerateString(formatter);
-      std::cout << "WARNING: " << RDKit::MolToSmiles(individual.GetPseudomol()) << " contains an unknown Connection " << connection_known.first.GetString() << " and won't be added to the population." << std::endl;
+    // Verify that the individuals have connections. Otherwise they can't evolve.
+    if (individual.GetConnections().Empty() && individual.GetInternalConnections().Empty()) {
+      std::cout << "WARNING: " << RDKit::MolToSmiles(individual.GetPseudomol()) << " has no Connections and won't be added to the population." << std::endl;
+      continue;
     };
+    // When a population comes from outside sources we can't be certain that the
+    // Connections within the ReconstructedMols are also recorded in the
+    // ConnectionQueryResults. The ReconstructedMols with unknown Connections are
+    // skipped, since our operators can't handle them.
+    std::pair<Connection, bool> connection_known = individual.HasKnownConnections(query_results);
+    if (!connection_known.second) {
+      std::cout << "WARNING: " << RDKit::MolToSmiles(individual.GetPseudomol()) << " contains an unknown Connection " << connection_known.first.GetString() << " and won't be added to the population." << std::endl;
+      continue;
+    }
+    if (id > max_individual_id) {
+      max_individual_id = id;
+    };
+    valid_population.push_back(individual);
+    valid_population.back().SetID(id++);
   };
   if (valid_population.empty()) {
     throw std::runtime_error("The valid population is empty");
@@ -217,11 +192,6 @@ void LEADD::SetPopulation(const std::list<ReconstructedMol>& new_population, boo
   if (settings.UsingGuidedEvolution() && reset_weights) {
     AssignConnectorWeightsToPopulation();
   };
-};
-
-void LEADD::SetPopulationFromSMILES(const std::vector<std::string>& new_population_smiles) {
-  std::list<ReconstructedMol> new_population = MakePopulationFromSMILES(new_population_smiles);
-  SetPopulation(new_population, true);
 };
 
 void LEADD::LoadPopulation() {
@@ -236,7 +206,11 @@ void LEADD::LoadPopulation() {
 };
 
 void LEADD::SavePopulation() const {
-  std::ofstream output_stream(settings.GetRestartOutputFile(), std::ofstream::binary);
+  SavePopulation(settings.GetRestartOutputFile());
+};
+
+void LEADD::SavePopulation(const std::string& file_path) const {
+  std::ofstream output_stream(file_path, std::ofstream::binary);
   boost::archive::binary_oarchive archive(output_stream);
   archive << population;
   output_stream.close();
@@ -292,7 +266,7 @@ unsigned LEADD::GenerateChildren() {
     ReconstructedMol child = parent;
     child.TakeBricksOwnership();
     // Attempt to evolve the child.
-    bool evolved = child.Evolve(settings, select_fragment_by_id, query_results, controller, prng, inventory, report);
+    bool evolved = child.Evolve(settings, database, query_results, controller, prng, inventory, report);
     if (!evolved) {
       continue;
     };
@@ -348,7 +322,7 @@ void LEADD::FinishGeneration() {
   };
 
   // Determine the score of the present population.
-  float score = 0;
+  float score = 0.0;
   if (settings.AverageScoreAsTerminationCriterion()) {
     for (const ReconstructedMol& individual : population) {
       score += individual.GetScore();
@@ -537,8 +511,11 @@ void LEADD::WriteOperationFrequenciesToReport() {
 void LEADD::ReportOnBestMolecule() {
   ReconstructedMol& rank1 = population.front();
   std::string score_text = std::to_string(rank1.GetScore());
-  rank1.Draw("rank1_" + score_text + ".svg");
-  report.WriteWeights(rank1, "rank1_weights_" + score_text + ".csv");
+  std::filesystem::path base_path (output_directory_path);
+  std::filesystem::path drawing_path = base_path.append("rank1_" + score_text + ".svg");
+  std::filesystem::path weights_path = base_path.append("rank1_weights_" + score_text + ".csv");
+  rank1.Draw(drawing_path);
+  report.WriteWeights(rank1, weights_path);
 };
 
 void LEADD::Cleanup() {
@@ -548,7 +525,7 @@ void LEADD::Cleanup() {
   };
 
   // Close the connection to the database.
-  sqlite3_close(database);
+  database.Close();
 
   // Close the connection to the similarity matrix.
   if (settings.UsingGuidedEvolution()) {
@@ -580,12 +557,11 @@ EvolutionReport& LEADD::GetReport() {
   return report;
 };
 
-std::list<ReconstructedMol> MakePopulationFromSMILES(const std::vector<std::string>& population_smiles, bool fragment_rings) {
-  boost::format formatter("(%d, %d, %d)");
+std::list<ReconstructedMol> MakePopulationFromSMILES(const std::vector<std::string>& population_smiles, const FragmentationSettings& settings) {
   std::list<ReconstructedMol> population;
   for (const std::string& smiles : population_smiles) {
     RDKit::ROMol* molecule = RDKit::SmilesToMol(smiles);
-    population.push_back(ConvertToReconstructedMol(*molecule, fragment_rings, false, formatter));
+    population.emplace_back(*molecule, settings);
     delete molecule;
   };
   return population;

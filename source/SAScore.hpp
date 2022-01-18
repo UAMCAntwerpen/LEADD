@@ -31,6 +31,17 @@ namespace RDKit {
 typedef std::unordered_map<std::uint32_t, std::uint64_t> FEATURE_COUNTS_MAP;
 typedef std::unordered_map<std::uint32_t, double> FEATURE_SCORES_MAP;
 
+struct SAScoreComponents {
+	double sascore = 0.0;
+	double feature_score = 0.0;
+	double complexity_score = 0.0;
+	double size_penalty = 0.0;
+	double stereo_penalty = 0.0;
+	double spiro_penalty = 0.0;
+	double bridgehead_penalty = 0.0;
+	double macrocycle_penalty = 0.0;
+};
+
 class SAScoreHeuristic {
 	double mu = 0.0;
 	double sigma = 0.0;
@@ -73,7 +84,11 @@ class FeatureLibrary {
 unsigned CalcNumChiralCenters(const RDKit::ROMol& mol, bool detect_chirality = true);
 bool HasMacrocycle(const RDKit::ROMol& mol);
 double CalcComplexityScore(const RDKit::ROMol& mol, bool detect_chirality = true);
+double CalcComplexityScore(const RDKit::ROMol& mol, SAScoreComponents& sascore_components, bool detect_chirality = true);
+double ScaleSAScore(double raw_sascore);
 double SAScore(const RDKit::ROMol& mol, const FeatureLibrary& feature_library, bool detect_chirality = true);
+double SAScore(const RDKit::ROMol& mol, const FeatureLibrary& feature_library, SAScoreComponents& sascore_components, bool detect_chirality = true);
 double SAScore(const RDKit::ROMol& mol, const RDKit::SparseIntVect<std::uint32_t>& fingerprint, const FeatureLibrary& feature_library, bool detect_chirality = true);
+
 
 #endif

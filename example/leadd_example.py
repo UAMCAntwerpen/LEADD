@@ -24,7 +24,7 @@ def ParseArgs():
         help="Path to a LEADD settings file.")
     parser.add_argument("output", type=str,
         help="Path to a directory where LEADD's output is stored.")
-    parser.add_argument("-r", "--reference", type=str, default="CN1CCN(CCNc2nc3cc(Cl)c(cc3nc2NCCN2CCN(C)CC2)C#CCCO)CC1",
+    parser.add_argument("-r", "--reference", type=str, default="CCNc1nc2cc(OC)c(Cl)cc2nc1-c1cccc(C(=O)NCc2ccccc2)c1",
         help="SMILES of the reference molecule used for scoring.")
     parser.add_argument("-v", "--verbose", action="store_true",
         help="Flag to print the progress of the evolution.")
@@ -39,11 +39,11 @@ def Main():
     scorer = ECFPSimilarityScorer(reference, 2)
 
     # Read the LEADD settings from the user-specified file.
-    settings = pyLEADD.LEADDSettings(settings_file_path=args.settings)
+    settings = pyLEADD.ReconstructionSettings(settings_file_path=args.settings)
     settings.Print()
 
     # Initialize a LEADD designer object. This also initializes the starting population.
-    leadd = pyLEADD.LEADD(settings=settings, output_directory_path=args.output)
+    leadd = pyLEADD.LEADD(reconstruction_settings=settings, output_directory_path=args.output)
 
     # Assign preliminary scores to the population members.
     # NOTE: to be as generic as possible, LEADD uses SMILES to communicate with
@@ -77,11 +77,13 @@ def Main():
     best_individual = leadd.GetBestIndividual()
     print(f"Best individual: {best_individual.GetSanitizedSMILES()}, Score: {best_individual.GetScore():.4f}")
 
-    # Write out the designed molecules.
-    output_molecules_path = os.path.join(args.output, "designed_molecules.smi")
-    with open(output_molecules_path, "w") as file:
+    # Write out the designed molecules in SMILES and binary format.
+    output_smiles_path = os.path.join(args.output, "population.smi")
+    with open(output_smiles_path, "w") as file:
         for molecule in leadd.GetPopulation():
             file.write(f"{molecule.GetSanitizedSMILES()} {molecule.GetScore()}\n")
+    output_population_path = os.path.join(args.output, "population.rst")
+    leadd.SavePopulation(output_population_path)
 
     # Release LEADD's resources.
     leadd.Cleanup()
