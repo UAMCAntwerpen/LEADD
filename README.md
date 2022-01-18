@@ -10,9 +10,6 @@ A more detailed description of the algorithm can be found in the corresponding p
 ## Authors
 * Alan Kerstjens (https://github.com/alankerstjens)
 
-## Authors
-* Alan Kerstjens (https://github.com/alankerstjens)
-
 ## Dependencies
 * [CMake](https://cmake.org/) (>= 3.15)
 * [C++17](https://isocpp.org/) and [OpenMP 4.0](https://www.openmp.org/) compliant compiler
