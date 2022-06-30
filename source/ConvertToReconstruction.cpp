@@ -1,4 +1,5 @@
 #include <iostream>
+#include <boost/serialization/library_version_type.hpp>
 #include <boost/serialization/list.hpp>
 #include <boost/program_options.hpp>
 #include <GraphMol/FileParsers/MolSupplier.h>

@@ -2,6 +2,7 @@
 #ifndef _CONNECTION_COMPATIBILITIES_HPP_
 #define _CONNECTION_COMPATIBILITIES_HPP_
 
+#include <boost/serialization/library_version_type.hpp>
 #include <boost/serialization/unordered_set.hpp>
 #include <boost/serialization/unordered_map.hpp>
 #include "PseudofragmentDB.hpp"

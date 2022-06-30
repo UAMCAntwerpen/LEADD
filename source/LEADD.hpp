@@ -3,6 +3,7 @@
 #define _LEADD_HPP_
 
 #include <GraphMol/SmilesParse/SmilesParse.h>
+#include <boost/serialization/library_version_type.hpp>
 #include <boost/serialization/list.hpp>
 #include "Reconstruction.hpp"
 #include "SAScore.hpp"
