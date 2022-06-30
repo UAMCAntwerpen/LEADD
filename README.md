@@ -28,9 +28,31 @@ If you are interested in re-running the benchmarks you will also need:
 The versions listed above have been tested to work on both Ubuntu 20.04 and Windows 10. Older versions may also work, with the exception of the RDKit due to [a bug in older versions](https://github.com/rdkit/rdkit/issues/3994).
 
 ## Installation
-This section assumes you are installing LEADD on a Linux system and that the environment variable `${RDBASE}` points to the RDKit's root directory. If this isn't the case, you might have to adapt these instructions slightly for your system.
+The following sections assume you are installing LEADD on a GNU/Linux machine. If this isn't the case you may have to adapt these instructions slightly.
 
-First, make sure all dependencies are installed. Thereafter, clone this repository, move into the project's directory and run the following commands.
+Clone this repository (along with the pybind11 submodule). The resulting directory will be referred to as `${LEADD}`.
+
+```bash
+git clone --recurse-submodules https://github.com/UAMCAntwerpen/LEADD.git
+```
+
+Install the rest of the dependencies. If you don't mind a bloated installation you can install them into an Anaconda environment using the provided `leadd_conda_env.yml` file.
+
+```bash
+cd ${LEADD}
+conda env create -f leadd_conda_env.yml
+conda activate LEADD
+```
+
+If you installed the RDKit through Anaconda you can build LEADD as follows:
+
+```bash
+mkdir build && cd build
+cmake -DRDKit_INCLUDE_DIRS=${CONDA_PREFIX}/include/rdkit -DRDKit_LIBRARY_DIRS=${CONDA_PREFIX}/lib ..
+make install clean
+```
+
+Alternatively, if you installed the RDKit from source you should have an environment variable `${RDBASE}` pointing to the RDKit's root directory:
 
 ```bash
 mkdir build && cd build
@@ -38,16 +60,14 @@ cmake -DRDKit_INCLUDE_DIRS=${RDBASE}/Code -DRDKit_LIBRARY_DIRS=${RDBASE}/lib ..
 make install clean
 ```
 
-If you don't want to build the Python bindings substitute the CMake command with the following:
+If you don't want to build the Python bindings add the `-DBUILD_PYTHON_BINDINGS=OFF` flag to the CMake commands. Otherwise you probably want to add `${LEADD}/lib` to your `${PYTHONPATH}` environment variable, for instance in your `.bashrc` file.
 
 ```bash
-cmake -DRDKit_INCLUDE_DIRS=${RDBASE}/Code -DRDKit_LIBRARY_DIRS=${RDBASE}/lib -DBUILD_PYTHON_BINDINGS=OFF ..
+export PYTHONPATH="${PYTHONPATH}:${LEADD}/lib"
 ```
 
-For optimal performance, advanced users should consider specifying the CPU architecture and other optimization compiler flags in the CMake command with the `CMAKE_CXX_FLAGS`.
-
 ## Example workflow
-This section assumes you have installed LEADD on a Linux system and that the environment variable `${LEADD}` points to LEADD's root directory. If you'd like to follow along you can find most referenced files in the [example directory](example). Most executables are parallelized with OpenMP and will by default use all cores of your CPU. You can change this behaviour by setting the `OMP_NUM_THREADS` environment variable before running the command.
+If you'd like to follow along you can find most referenced files in the [example directory](example). Most executables are parallelized with OpenMP and will by default use all cores of your CPU. You can change this behaviour by setting the `OMP_NUM_THREADS` environment variable before running the command.
 
 The first step is to create the fragments' SQLite3 database. In this example we will fragment [`PGK1_ligands.smi`](example/PGK1_ligands.smi), splitting acyclic regions into atomic fragments and defining connectors with MMFF94 atom types.
 
@@ -79,7 +99,7 @@ Now you are ready to run LEADD itself. Make sure the absolute paths to the files
 If you are using LEADD programatically with the Python bindings make sure your Python interpreter can find the LEADD shared library, for instance by adding `${LEADD}/lib` to your `${PYTHONPATH}`. The [provided example script](example/leadd_example.py) will attempt to rediscover [one of the ligands we just fragmented](example/CHEMBL3732863.smi):
 
 ```bash
-python ${LEADD}/lib/leadd_example.py reconstruction_settings.txt . -v
+python ${LEADD}/example/leadd_example.py reconstruction_settings.txt . -v
 ```
 
 Alternatively, you can run LEADD as a standalone executable. Normally this requires [coupling a scoring function](#Scoring-settings). For this example we can use the included topological similarity scoring function to rediscover [the same ligand](example/CHEMBL3732863.smi):
