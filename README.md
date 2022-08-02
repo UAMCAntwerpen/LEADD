@@ -20,7 +20,7 @@ A more detailed description of the algorithm can be found in the corresponding p
 
 It's recommended to also build the Python bindings. On top of the above, you will need the following:
 * [Python](https://www.python.org/) (>= 3.8.8)
-* [pybind11](https://github.com/pybind/pybind11) (>= 2.6.2). If you clone this repository it should be included in the distribution.
+* [pybind11](https://github.com/pybind/pybind11) (>= 2.6.2). If you clone this repository (with ```git clone --recurse-submodules```) it should be included in the distribution.
 
 If you are interested in re-running the benchmarks you will also need:
 * [GuacaMol](https://github.com/BenevolentAI/guacamol)
